@@ -102,16 +102,27 @@ Edit the `.env` file to configure the webhook server:
 3. You'll receive an API key via email
 4. Add it to your `.env` file
 
-### Finding Ferry Route IDs
+### Available Ferry Routes
 
-Common Washington State Ferry routes:
+Use these route IDs when configuring your webhook URL:
 
-- **Seattle - Bainbridge Island**: Check WSDOT API documentation
-- **Mukilteo - Clinton**: Check WSDOT API documentation
-- **Edmonds - Kingston**: Check WSDOT API documentation
-- **Fauntleroy - Vashon - Southworth**: Check WSDOT API documentation
+| Route ID | Route Name |
+|----------|------------|
+| `sea-bi` | Seattle / Bainbridge Island |
+| `sea-br` | Seattle / Bremerton |
+| `ed-king` | Edmonds / Kingston |
+| `muk-cl` | Mukilteo / Clinton |
+| `f-v-s` | Fauntleroy / Vashon |
+| `f-s` | Fauntleroy / Southworth |
+| `s-v` | Southworth / Vashon |
+| `pt-key` | Port Townsend / Coupeville |
+| `pd-tal` | Pt. Defiance / Tahlequah |
+| `ana-sj` | Anacortes / San Juan Islands |
 
-You can find all route IDs by calling the WSDOT API or checking their documentation.
+**Example**: To show Seattle/Bainbridge ferries, use:
+```
+https://your-domain.com/webhook?route_id=sea-bi
+```
 
 ## API Endpoints
 
@@ -197,13 +208,26 @@ Fill in the following fields:
 | **Refresh Strategy** | `Webhook` | Server provides the HTML |
 | **Polling Interval** | `15 minutes` | Recommended: 15-30 minutes |
 
-### Step 5: Configure Route (Optional)
+### Step 5: Configure Webhook URL with Route
 
-To display a specific ferry route, add a query parameter to your webhook URL:
+To display a specific ferry route, add the `route_id` query parameter to your webhook URL.
 
-```
-https://your-domain.com/webhook?route_id=YOUR_ROUTE_ID
-```
+**Webhook URL Examples:**
+
+| Route | Webhook URL |
+|-------|-------------|
+| Seattle / Bainbridge | `https://your-domain.com/webhook?route_id=sea-bi` |
+| Seattle / Bremerton | `https://your-domain.com/webhook?route_id=sea-br` |
+| Edmonds / Kingston | `https://your-domain.com/webhook?route_id=ed-king` |
+| Mukilteo / Clinton | `https://your-domain.com/webhook?route_id=muk-cl` |
+| Fauntleroy / Vashon | `https://your-domain.com/webhook?route_id=f-v-s` |
+| Fauntleroy / Southworth | `https://your-domain.com/webhook?route_id=f-s` |
+| Southworth / Vashon | `https://your-domain.com/webhook?route_id=s-v` |
+| Port Townsend / Coupeville | `https://your-domain.com/webhook?route_id=pt-key` |
+| Pt. Defiance / Tahlequah | `https://your-domain.com/webhook?route_id=pd-tal` |
+| Anacortes / San Juan Islands | `https://your-domain.com/webhook?route_id=ana-sj` |
+
+**Note:** If you omit `route_id`, the webhook will show all vessels (not recommended for e-ink display).
 
 ### Step 6: Save and Test
 
