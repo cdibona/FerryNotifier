@@ -56,7 +56,7 @@ Install Python dependencies:
 
 ```bash
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r web/requirements.txt
 ```
 
 ## Step 5: Configure Environment Variables
@@ -84,7 +84,7 @@ Save and exit (Ctrl+X, then Y, then Enter).
 Test that the application runs:
 
 ```bash
-python app.py
+python web/app.py
 ```
 
 You should see output like:
@@ -114,7 +114,7 @@ sudo chown www-data:www-data /var/log/ferrytrmnl
 Copy the systemd service file:
 
 ```bash
-sudo cp ferrytrmnl.service /etc/systemd/system/
+sudo cp deployment/ferrytrmnl.service /etc/systemd/system/
 ```
 
 Edit the service file if needed (adjust paths, user, workers):
@@ -154,7 +154,7 @@ sudo journalctl -u ferrytrmnl -f
 Copy the nginx configuration:
 
 ```bash
-sudo cp nginx.conf.example /etc/nginx/sites-available/ferrytrmnl
+sudo cp deployment/nginx.conf.example /etc/nginx/sites-available/ferrytrmnl
 ```
 
 Edit the configuration file:
@@ -226,6 +226,40 @@ curl https://ferry.yourdomain.com/api/ferry-status
 5. Save and test the plugin
 6. Assign to your Trmnl device
 
+## Docker Deployment (Alternative)
+
+### Build and Run
+
+```bash
+# Build the Docker image from project root
+docker build -f deployment/Dockerfile -t ferrytrmnl .
+
+# Run with .env file
+docker run -p 5050:5050 --env-file .env ferrytrmnl
+```
+
+Or use docker-compose:
+
+```bash
+cd deployment
+docker-compose up --build -d
+```
+
+### Test Health Check
+
+```bash
+# Check if container is healthy
+docker ps
+
+# Should show "healthy" in the STATUS column
+```
+
+### View Logs
+
+```bash
+docker-compose logs -f
+```
+
 ## Monitoring and Maintenance
 
 ### View Application Logs
@@ -265,9 +299,32 @@ sudo systemctl reload nginx
 cd /opt/FerryTrmnl
 git pull
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r web/requirements.txt
 sudo systemctl restart ferrytrmnl
 ```
+
+## CI/CD Deployment
+
+For automated deployments using GitHub Actions, see the workflow configuration in `.github/workflows/deploy.yml`.
+
+### GitHub Secrets Required
+
+Configure these secrets in your GitHub repository settings:
+
+| Secret | Description |
+|--------|-------------|
+| `STAGING_HOST` | Staging server hostname |
+| `STAGING_USER` | SSH username for staging |
+| `STAGING_SSH_KEY` | SSH private key for staging |
+| `PROD_HOST` | Production server hostname |
+| `PROD_USER` | SSH username for production |
+| `PROD_SSH_KEY` | SSH private key for production |
+
+### Deployment Triggers
+
+- **Push to main**: Deploys to staging
+- **Create release/tag**: Deploys to production
+- **Manual trigger**: Deploy to staging or production via GitHub Actions UI
 
 ## Troubleshooting
 

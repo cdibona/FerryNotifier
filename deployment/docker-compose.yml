@@ -2,13 +2,15 @@ version: '3.8'
 
 services:
   ferrytrmnl:
-    build: .
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
     container_name: ferrytrmnl
     restart: unless-stopped
     ports:
       - "5050:5050"
     env_file:
-      - .env
+      - ../.env
     environment:
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5050

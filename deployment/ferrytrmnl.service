@@ -2,7 +2,7 @@
 # Place this file in /etc/systemd/system/ferrytrmnl.service
 #
 # Installation:
-# 1. Copy this file: sudo cp ferrytrmnl.service /etc/systemd/system/
+# 1. Copy this file: sudo cp deployment/ferrytrmnl.service /etc/systemd/system/
 # 2. Reload systemd: sudo systemctl daemon-reload
 # 3. Enable service: sudo systemctl enable ferrytrmnl
 # 4. Start service: sudo systemctl start ferrytrmnl
@@ -22,7 +22,7 @@ User=www-data
 Group=www-data
 
 # Working directory (adjust to your installation path)
-WorkingDirectory=/opt/FerryTrmnl
+WorkingDirectory=/opt/FerryTrmnl/web
 
 # Environment variables
 Environment="PATH=/opt/FerryTrmnl/venv/bin:/usr/local/bin:/usr/bin:/bin"

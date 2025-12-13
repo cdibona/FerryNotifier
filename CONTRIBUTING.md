@@ -2,6 +2,27 @@
 
 Thank you for your interest in contributing to FerryTrmnl! This document provides guidelines and instructions for contributing to the project.
 
+## Project Structure
+
+```
+FerryTrmnl/
+├── web/                    # Web application code
+│   ├── app.py              # Main Flask application
+│   ├── test_app.py         # Unit tests
+│   └── requirements.txt    # Python dependencies
+├── deployment/             # Deployment configurations
+│   ├── Dockerfile          # Docker container definition
+│   ├── docker-compose.yml  # Docker Compose configuration
+│   ├── ferrytrmnl.service  # Systemd service file
+│   ├── nginx.conf.example  # Nginx reverse proxy config
+│   └── run.sh              # Quick-start development script
+├── .github/
+│   └── workflows/          # GitHub Actions CI/CD
+│       └── deploy.yml      # Deployment workflow
+├── .env.template           # Environment variables template
+└── docs/                   # Documentation files
+```
+
 ## Getting Started
 
 ### Prerequisites
@@ -28,7 +49,7 @@ Thank you for your interest in contributing to FerryTrmnl! This document provide
 
 4. Install dependencies:
    ```bash
-   pip install -r requirements.txt
+   pip install -r web/requirements.txt
    ```
 
 5. Set up your environment:
@@ -56,12 +77,17 @@ Thank you for your interest in contributing to FerryTrmnl! This document provide
 
 Before submitting a pull request:
 
-1. Test the application runs:
+1. Run the automated tests:
    ```bash
-   python app.py
+   python web/test_app.py
    ```
 
-2. Test all endpoints:
+2. Test the application runs:
+   ```bash
+   python web/app.py
+   ```
+
+3. Test all endpoints:
    ```bash
    # In another terminal
    curl http://localhost:5050/health
@@ -69,9 +95,9 @@ Before submitting a pull request:
    curl http://localhost:5050/api/ferry-status
    ```
 
-3. Check for Python errors:
+4. Check for Python errors:
    ```bash
-   python -m py_compile app.py
+   python -m py_compile web/app.py
    ```
 
 ### Commit Messages
@@ -147,12 +173,16 @@ We welcome contributions in these areas:
      - Testing performed
      - Screenshots (if UI changes)
 
-4. **Respond to feedback**:
+4. **Wait for CI checks**:
+   - GitHub Actions will run tests automatically
+   - Ensure all checks pass before requesting review
+
+5. **Respond to feedback**:
    - Address reviewer comments
    - Push additional commits as needed
    - Keep the discussion constructive
 
-5. **After approval**:
+6. **After approval**:
    - Maintainers will merge your PR
    - You can delete your feature branch
 
@@ -166,12 +196,17 @@ Use the development server for testing:
 FLASK_DEBUG=True
 
 # Run the server
-python app.py
+python web/app.py
+```
+
+Or use the quick start script:
+```bash
+./deployment/run.sh
 ```
 
 ### Testing with Mock Data
 
-For testing without API calls, you can modify the `fetch_ferry_status` function to return mock data during development.
+For testing without API calls, you can modify the `fetch_ferry_status` function in `web/app.py` to return mock data during development.
 
 ### Debugging
 
@@ -188,14 +223,36 @@ Be mindful of WSDOT API rate limits during development. Consider:
 - Adding delays between API calls
 - Testing with minimal API calls
 
+### Docker Development
+
+For testing Docker builds:
+```bash
+# Build from project root
+docker build -f deployment/Dockerfile -t ferrytrmnl .
+
+# Run container
+docker run -p 5050:5050 --env-file .env ferrytrmnl
+```
+
 ## Documentation
 
 When adding features, please update:
 
 - README.md - For user-facing changes
 - INSTALL.md - For deployment changes
+- TESTING.md - For testing-related changes
 - Code comments - For complex logic
 - Docstrings - For all functions
+
+## CI/CD
+
+This project uses GitHub Actions for continuous integration and deployment:
+
+- **Tests**: Run on every push and pull request
+- **Staging deployment**: Triggers on merge to main
+- **Production deployment**: Triggers on release/tag creation
+
+See `.github/workflows/deploy.yml` for the full configuration.
 
 ## Questions?
 

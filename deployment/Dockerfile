@@ -1,5 +1,5 @@
 # Dockerfile for FerryTrmnl
-# Build: docker build -t ferrytrmnl .
+# Build from project root: docker build -f deployment/Dockerfile -t ferrytrmnl .
 # Run: docker run -p 5050:5050 --env-file .env ferrytrmnl
 
 FROM python:3.11-slim
@@ -21,13 +21,13 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY requirements.txt .
+COPY web/requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY app.py .
+COPY web/app.py .
 
 # Create a non-root user
 RUN useradd -m -u 1000 ferrytrmnl && \
