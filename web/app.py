@@ -1051,90 +1051,45 @@ TRMNL_PREVIEW_TEMPLATE = """
 <html>
 <head>
     <meta charset="UTF-8">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: white;
-            color: black;
-            padding: 16px;
-        }
-        .layout { }
-        .title {
-            font-size: 20px;
-            font-weight: bold;
-            padding-bottom: 8px;
-            border-bottom: 2px solid black;
-            margin-bottom: 12px;
-        }
-        .content { }
-        .item {
-            padding: 10px 0;
-            border-bottom: 1px solid #ccc;
-        }
-        .item:last-child {
-            border-bottom: none;
-        }
-        .primary_text {
-            font-size: 18px;
-            font-weight: bold;
-            display: block;
-            margin-bottom: 4px;
-        }
-        .label {
-            display: inline-block;
-            background: black;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 3px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        .label--small {
-            font-size: 11px;
-            padding: 1px 6px;
-        }
-        .description {
-            font-size: 14px;
-            color: #333;
-            margin-top: 4px;
-        }
-        .footer {
-            margin-top: 16px;
-            padding-top: 10px;
-            border-top: 1px solid #ccc;
-            display: flex;
-            justify-content: space-between;
-            font-size: 11px;
-        }
-        .footer .label {
-            background: transparent;
-            color: #555;
-            padding: 0;
-        }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;350;375;400;450;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://usetrmnl.com/css/latest/plugins.css">
 </head>
-<body>
-    <div class="layout">
-        <div class="title">FerryTrmnl: {{ route_name }}</div>
-        <div class="content">
-            {% for vessel in vessels %}
-            <div class="item">
-                <span class="primary_text">{{ vessel.name }}</span>
-                <span class="label label--small">{{ vessel.status }}</span>
-                {% if vessel.location %}
-                <div class="description">{{ vessel.location }}</div>
-                {% endif %}
+<body class="environment trmnl">
+    <div class="screen">
+        <div class="view view--full">
+            <div class="layout">
+                <div class="columns">
+                    <div class="column">
+                        <div class="markdown">
+                            <div class="content">
+                                <span class="title">{{ route_name }}</span>
+                            </div>
+                            {% for vessel in vessels %}
+                            <div class="content" style="margin-top: 16px; padding: 12px; border: 2px solid #000;">
+                                <span class="title" style="font-size: 24px;">{{ vessel.name }}</span>
+                                <span class="label">{{ vessel.status }}</span>
+                                {% if vessel.location %}
+                                <p style="margin-top: 8px;">{{ vessel.location }}</p>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                            <div class="content" style="margin-top: 16px;">
+                                <span class="label">
+                                    {% for terminal, space in terminal_spaces.items() %}
+                                    {{ terminal }}: {{ space.drive_up }} spots{% if not loop.last %} | {% endif %}
+                                    {% endfor %}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            {% endfor %}
-        </div>
-        <div class="footer">
-            <span class="label">
-                {% for terminal, space in terminal_spaces.items() %}
-                {{ terminal }}: {{ space.drive_up }} spots{% if not loop.last %} | {% endif %}
-                {% endfor %}
-            </span>
-            <span class="label">Updated {{ update_time }}</span>
+            <div class="title_bar">
+                <span class="title">FerryTrmnl</span>
+                <span class="instance">Updated {{ update_time }}</span>
+            </div>
         </div>
     </div>
 </body>
