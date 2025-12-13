@@ -193,7 +193,7 @@ Before configuring Trmnl, you need your FerryTrmnl server running and accessible
 
 1. Click on **"Plugins"** in the left sidebar
 2. Click **"Create New Plugin"** or **"Add Plugin"**
-3. Select **"Private Plugin"** (for custom webhooks)
+3. Select **"Private Plugin"** (for custom polling plugins)
 
 ### Step 4: Configure Plugin Settings
 
@@ -202,19 +202,21 @@ Fill in the following fields:
 | Setting | Value | Notes |
 |---------|-------|-------|
 | **Plugin Name** | `Washington State Ferries` | Or any name you prefer |
-| **Plugin Type** | `Webhook` | Select webhook/URL type |
-| **Webhook URL** | `https://your-domain.com/webhook` | Your deployed server URL |
-| **Method** | `GET` | FerryTrmnl uses GET requests |
-| **Refresh Strategy** | `Webhook` | Server provides the HTML |
-| **Polling Interval** | `15 minutes` | Recommended: 15-30 minutes |
+| **Strategy** | `Polling` | TRMNL fetches data from your server |
+| **Polling URL** | `https://your-domain.com/webhook?route_id=sea-bi` | Your server URL with route |
+| **Polling Verb** | `GET` | FerryTrmnl uses GET requests |
+| **Polling Headers** | *(leave empty)* | No authentication required |
+| **Refresh Rate** | `15 minutes` | Recommended: 15-30 minutes |
 
-### Step 5: Configure Webhook URL with Route
+**Note:** This is a **Polling** plugin (TRMNL pulls data from your server), not a Webhook plugin (where TRMNL would push data to you).
 
-To display a specific ferry route, add the `route_id` query parameter to your webhook URL.
+### Step 5: Configure Polling URL with Route
 
-**Webhook URL Examples:**
+To display a specific ferry route, add the `route_id` query parameter to your polling URL.
 
-| Route | Webhook URL |
+**Polling URL Examples:**
+
+| Route | Polling URL |
 |-------|-------------|
 | Seattle / Bainbridge | `https://your-domain.com/webhook?route_id=sea-bi` |
 | Seattle / Bremerton | `https://your-domain.com/webhook?route_id=sea-br` |

@@ -54,16 +54,10 @@ TRMNL_TEMPLATE = """
             margin: 0;
             padding: 15px;
             background-color: white;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
         }
         .container {
             max-width: 800px;
             margin: 0 auto;
-            flex: 1;
-            display: flex;
-            flex-direction: column;
         }
         .header {
             font-size: 22px;
@@ -79,7 +73,6 @@ TRMNL_TEMPLATE = """
             color: #000;
         }
         .vessels-section {
-            flex: 1;
             margin-top: 10px;
         }
         .vessel-info {
