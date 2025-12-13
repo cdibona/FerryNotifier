@@ -1138,6 +1138,11 @@ def api_trmnl_preview():
     # Get optional route_id from query parameters
     route_id = request.args.get('route_id', FERRY_ROUTE_ID)
 
+    # Send Discord notification if configured
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+    user_agent = request.headers.get('User-Agent', '')
+    send_discord_notification('/api/trmnl/preview', route_id, ip_address, user_agent)
+
     # Fetch and format ferry data
     ferry_data = fetch_ferry_status(route_id)
     formatted_data = format_ferry_data(ferry_data)
