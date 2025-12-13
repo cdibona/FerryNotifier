@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info
+.venv
+venv/
+env/
+
+# Environment
+.env
+.envrc
+
+# Documentation
+*.md
+!README.md
+LICENSE
+
+# Development
+.vscode
+.idea
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+.DS_Store
