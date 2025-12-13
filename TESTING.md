@@ -9,7 +9,7 @@ This guide explains how to test the FerryTrmnl webhook server.
 Run the included test suite:
 
 ```bash
-python3 test_app.py
+python web/test_app.py
 ```
 
 The test suite includes:
@@ -19,19 +19,28 @@ The test suite includes:
 - API endpoint tests
 - Data formatting tests
 
+### CI/CD Tests
+
+Tests run automatically via GitHub Actions on:
+- Every push to any branch
+- Every pull request to main
+- Before any deployment
+
+See `.github/workflows/deploy.yml` for the CI configuration.
+
 ### Manual Testing
 
 #### 1. Start the Development Server
 
 ```bash
 # Make sure .env is configured with your API key
-python3 app.py
+python web/app.py
 ```
 
 Or use the quick start script:
 
 ```bash
-./run.sh
+./deployment/run.sh
 ```
 
 #### 2. Test Basic Endpoints
@@ -104,8 +113,8 @@ curl "http://localhost:5050/api/ferry-status?route_id=YOUR_ROUTE_ID" | jq
 ### Build and Run
 
 ```bash
-# Build the Docker image
-docker build -t ferrytrmnl .
+# Build the Docker image from project root
+docker build -f deployment/Dockerfile -t ferrytrmnl .
 
 # Run with .env file
 docker run -p 5050:5050 --env-file .env ferrytrmnl
@@ -114,6 +123,7 @@ docker run -p 5050:5050 --env-file .env ferrytrmnl
 Or use docker-compose:
 
 ```bash
+cd deployment
 docker-compose up --build
 ```
 
@@ -129,6 +139,7 @@ docker ps
 ### View Logs
 
 ```bash
+cd deployment
 docker-compose logs -f
 ```
 
@@ -143,7 +154,7 @@ curl "https://www.wsdot.wa.gov/ferries/api/vessels/rest/vessellocations?apiacces
 
 ### Mock API Responses
 
-For development without hitting the WSDOT API, you can modify `app.py` temporarily:
+For development without hitting the WSDOT API, you can modify `web/app.py` temporarily:
 
 ```python
 def fetch_ferry_status(route_id: Optional[str] = None) -> Dict[str, Any]:
@@ -170,6 +181,7 @@ def fetch_ferry_status(route_id: Optional[str] = None) -> Dict[str, Any]:
 ### Test Gunicorn
 
 ```bash
+cd web
 gunicorn -w 4 -b 127.0.0.1:5050 app:app
 ```
 
@@ -270,7 +282,13 @@ sudo tail -f /var/log/ferrytrmnl/access.log
 Make sure you're in the correct directory:
 ```bash
 cd /path/to/FerryTrmnl
-python3 test_app.py
+python web/test_app.py
+```
+
+Or run from the web directory:
+```bash
+cd /path/to/FerryTrmnl/web
+python test_app.py
 ```
 
 ### API Connection Errors
@@ -297,6 +315,7 @@ FLASK_PORT=5051
 
 ```bash
 # Check Docker logs
+cd deployment
 docker-compose logs
 
 # Rebuild without cache
@@ -312,13 +331,13 @@ For ongoing development, consider:
 
 1. **Watch mode**: Use a tool like `watchdog` to run tests on file changes
 2. **Pre-commit hooks**: Run tests before commits
-3. **CI/CD**: Set up GitHub Actions for automated testing
+3. **CI/CD**: GitHub Actions runs tests automatically (see `.github/workflows/deploy.yml`)
 
 ## Test Checklist
 
 Before deploying to production:
 
-- [ ] All automated tests pass
+- [ ] All automated tests pass (`python web/test_app.py`)
 - [ ] Manual endpoint tests successful
 - [ ] WSDOT API integration works
 - [ ] HTML output displays correctly

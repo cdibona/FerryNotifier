@@ -10,6 +10,34 @@ A Washington State Ferry status display plugin for [Trmnl](https://usetrmnl.com/
 - **E-ink Optimized**: Display formatted for e-ink screens with clear, readable text
 - **REST API**: Provides both HTML webhook and JSON API endpoints
 - **Production Ready**: Designed to run behind nginx with systemd service management
+- **CI/CD Ready**: Includes GitHub Actions workflows for automated testing and deployment
+
+## Project Structure
+
+```
+FerryTrmnl/
+├── web/                    # Web application code
+│   ├── app.py              # Main Flask application
+│   ├── test_app.py         # Unit tests
+│   └── requirements.txt    # Python dependencies
+├── deployment/             # Deployment configurations
+│   ├── Dockerfile          # Docker container definition
+│   ├── docker-compose.yml  # Docker Compose configuration
+│   ├── ferrytrmnl.service  # Systemd service file
+│   ├── nginx.conf.example  # Nginx reverse proxy config
+│   └── run.sh              # Quick-start development script
+├── .github/
+│   └── workflows/          # GitHub Actions CI/CD
+│       └── deploy.yml      # Deployment workflow
+├── .env.template           # Environment variables template
+├── .gitignore              # Git ignore rules
+├── .dockerignore           # Docker ignore rules
+├── LICENSE                 # MIT License
+├── README.md               # This file
+├── INSTALL.md              # Installation/deployment guide
+├── TESTING.md              # Testing guide
+└── CONTRIBUTING.md         # Contribution guidelines
+```
 
 ## Quick Start
 
@@ -29,7 +57,7 @@ A Washington State Ferry status display plugin for [Trmnl](https://usetrmnl.com/
 
 2. **Install dependencies**:
    ```bash
-   pip install -r requirements.txt
+   pip install -r web/requirements.txt
    ```
 
 3. **Configure environment variables**:
@@ -46,7 +74,7 @@ A Washington State Ferry status display plugin for [Trmnl](https://usetrmnl.com/
 
 5. **Run the server**:
    ```bash
-   python app.py
+   python web/app.py
    ```
 
 The server will start on `http://localhost:5050` by default.
@@ -133,6 +161,84 @@ curl http://localhost:5050/health
 
 Root endpoint providing service information and available endpoints.
 
+## Trmnl Plugin Configuration
+
+This section provides detailed instructions for configuring FerryTrmnl as a plugin in the Trmnl dashboard.
+
+### Step 1: Deploy Your Webhook Server
+
+Before configuring Trmnl, you need your FerryTrmnl server running and accessible from the internet:
+
+1. Deploy to a server with a public IP or domain name
+2. Set up HTTPS using Let's Encrypt (see [INSTALL.md](INSTALL.md))
+3. Verify your webhook is accessible: `curl https://your-domain.com/webhook`
+
+### Step 2: Log in to Trmnl Dashboard
+
+1. Go to [usetrmnl.com](https://usetrmnl.com/) and log in to your account
+2. Navigate to your device dashboard
+
+### Step 3: Create a New Private Plugin
+
+1. Click on **"Plugins"** in the left sidebar
+2. Click **"Create New Plugin"** or **"Add Plugin"**
+3. Select **"Private Plugin"** (for custom webhooks)
+
+### Step 4: Configure Plugin Settings
+
+Fill in the following fields:
+
+| Setting | Value | Notes |
+|---------|-------|-------|
+| **Plugin Name** | `Washington State Ferries` | Or any name you prefer |
+| **Plugin Type** | `Webhook` | Select webhook/URL type |
+| **Webhook URL** | `https://your-domain.com/webhook` | Your deployed server URL |
+| **Method** | `GET` | FerryTrmnl uses GET requests |
+| **Refresh Strategy** | `Webhook` | Server provides the HTML |
+| **Polling Interval** | `15 minutes` | Recommended: 15-30 minutes |
+
+### Step 5: Configure Route (Optional)
+
+To display a specific ferry route, add a query parameter to your webhook URL:
+
+```
+https://your-domain.com/webhook?route_id=YOUR_ROUTE_ID
+```
+
+### Step 6: Save and Test
+
+1. Click **"Save"** to create the plugin
+2. Click **"Test Plugin"** or **"Preview"** to verify it works
+3. You should see the ferry status HTML rendered
+
+### Step 7: Assign to Device
+
+1. Go to your device settings
+2. Add the new plugin to your device's playlist
+3. Configure the display duration and position
+
+### Step 8: Verify Display
+
+1. Wait for the next refresh cycle (or force a refresh on your device)
+2. Verify the ferry status displays correctly on your Trmnl e-ink screen
+
+### Troubleshooting Trmnl Integration
+
+**Plugin shows "Error" or blank screen:**
+- Verify your webhook URL is accessible from the internet
+- Check that HTTPS is properly configured
+- Test the URL manually: `curl https://your-domain.com/webhook`
+- Check server logs for errors
+
+**Data not updating:**
+- Verify the polling interval is set correctly
+- Check that your WSDOT API key is valid
+- Review server logs for API errors
+
+**Display formatting issues:**
+- The HTML is optimized for Trmnl e-ink displays
+- Ensure no CSS overrides are applied in Trmnl settings
+
 ## Production Deployment
 
 ### Running with Gunicorn
@@ -140,89 +246,47 @@ Root endpoint providing service information and available endpoints.
 For production, use Gunicorn instead of the Flask development server:
 
 ```bash
+cd web
 gunicorn -w 4 -b 0.0.0.0:5050 app:app
+```
+
+### Docker Deployment
+
+Build and run with Docker:
+
+```bash
+# Build from project root
+docker build -f deployment/Dockerfile -t ferrytrmnl .
+
+# Run
+docker run -p 5050:5050 --env-file .env ferrytrmnl
+```
+
+Or use docker-compose:
+
+```bash
+cd deployment
+docker-compose up -d
 ```
 
 ### Systemd Service
 
-Create a systemd service file at `/etc/systemd/system/ferrytrmnl.service`:
-
-```ini
-[Unit]
-Description=FerryTrmnl Webhook Server
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/opt/FerryTrmnl
-Environment="PATH=/opt/FerryTrmnl/venv/bin"
-ExecStart=/opt/FerryTrmnl/venv/bin/gunicorn -w 4 -b 127.0.0.1:5050 app:app
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start the service:
+Copy the systemd service file:
 
 ```bash
+sudo cp deployment/ferrytrmnl.service /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl enable ferrytrmnl
 sudo systemctl start ferrytrmnl
-sudo systemctl status ferrytrmnl
 ```
 
 ### Nginx Configuration
 
-Create an nginx configuration at `/etc/nginx/sites-available/ferrytrmnl`:
-
-```nginx
-server {
-    listen 80;
-    server_name ferry.yourdomain.com;
-
-    # Redirect HTTP to HTTPS
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name ferry.yourdomain.com;
-
-    # SSL configuration
-    ssl_certificate /etc/letsencrypt/live/ferry.yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/ferry.yourdomain.com/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    # Security headers
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-
-    # Logging
-    access_log /var/log/nginx/ferrytrmnl_access.log;
-    error_log /var/log/nginx/ferrytrmnl_error.log;
-
-    location / {
-        proxy_pass http://127.0.0.1:5050;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # Timeouts
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 60s;
-        proxy_read_timeout 60s;
-    }
-}
-```
-
-Enable the site:
+Copy and configure nginx:
 
 ```bash
+sudo cp deployment/nginx.conf.example /etc/nginx/sites-available/ferrytrmnl
+# Edit and replace ferry.yourdomain.com with your domain
 sudo ln -s /etc/nginx/sites-available/ferrytrmnl /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
@@ -235,23 +299,25 @@ sudo apt-get install certbot python3-certbot-nginx
 sudo certbot --nginx -d ferry.yourdomain.com
 ```
 
-## Trmnl Setup
+## CI/CD Deployment
 
-1. **Log in to your Trmnl account** at [usetrmnl.com](https://usetrmnl.com/)
+This project includes GitHub Actions workflows for automated deployment. See `.github/workflows/deploy.yml` for the configuration.
 
-2. **Create a new Plugin**:
-   - Go to your dashboard
-   - Click "Add Plugin" or "Create Custom Plugin"
-   - Choose "Webhook" type
+### Setting Up CI/CD
 
-3. **Configure the webhook**:
-   - **Webhook URL**: `https://ferry.yourdomain.com/webhook`
-   - **Refresh Interval**: Set to your preference (e.g., 15 minutes)
-   - **Method**: GET
+1. **Configure GitHub Secrets** in your repository settings:
+   - `STAGING_HOST`: Your staging server hostname
+   - `STAGING_USER`: SSH username for staging
+   - `STAGING_SSH_KEY`: SSH private key for staging
+   - `PROD_HOST`: Your production server hostname
+   - `PROD_USER`: SSH username for production
+   - `PROD_SSH_KEY`: SSH private key for production
+   - `WSDOT_API_KEY`: Your WSDOT API key
 
-4. **Save and test** the plugin
-
-5. **Assign to your device** to start displaying ferry status
+2. **Deployment Workflow**:
+   - Push to `main` branch triggers staging deployment
+   - Creating a release/tag triggers production deployment
+   - Manual deployment via GitHub Actions UI
 
 ## Development
 
@@ -262,12 +328,22 @@ sudo certbot --nginx -d ferry.yourdomain.com
 FLASK_DEBUG=True
 
 # Run the development server
-python app.py
+python web/app.py
+```
+
+Or use the quick start script:
+
+```bash
+./deployment/run.sh
+```
+
+### Running Tests
+
+```bash
+python web/test_app.py
 ```
 
 ### Testing the Webhook
-
-Test the webhook locally:
 
 ```bash
 # Test the HTML output
@@ -280,18 +356,6 @@ curl http://localhost:5050/api/ferry-status | jq
 curl "http://localhost:5050/webhook?route_id=YOUR_ROUTE_ID"
 ```
 
-### Project Structure
-
-```
-FerryTrmnl/
-├── app.py              # Main Flask application
-├── requirements.txt    # Python dependencies
-├── .env.template      # Environment variables template
-├── .env               # Your local configuration (not in git)
-├── .gitignore         # Git ignore rules
-└── README.md          # This file
-```
-
 ## Troubleshooting
 
 ### Common Issues
@@ -299,7 +363,7 @@ FerryTrmnl/
 **"API key not configured" error**:
 - Make sure you've copied `.env.template` to `.env`
 - Verify your `WSDOT_API_KEY` is set correctly in `.env`
-- Ensure the `.env` file is in the same directory as `app.py`
+- Ensure the `.env` file is in the project root directory
 
 **"Failed to fetch ferry data" error**:
 - Check your internet connection
@@ -336,7 +400,7 @@ sudo tail -f /var/log/nginx/ferrytrmnl_access.log
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 

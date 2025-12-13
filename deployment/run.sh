@@ -1,5 +1,6 @@
 #!/bin/bash
 # Quick start script for FerryTrmnl development server
+# Run from project root: ./deployment/run.sh
 
 # Color output
 RED='\033[0;31m'
@@ -7,9 +8,16 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Get script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
 echo "FerryTrmnl - Washington State Ferry Status Webhook"
 echo "===================================================="
 echo ""
+
+# Change to project root
+cd "$PROJECT_ROOT"
 
 # Check if .env file exists
 if [ ! -f .env ]; then
@@ -31,7 +39,7 @@ fi
 # Check if Python dependencies are installed
 if ! python3 -c "import flask" 2>/dev/null; then
     echo -e "${YELLOW}Installing Python dependencies...${NC}"
-    pip install -r requirements.txt
+    pip install -r web/requirements.txt
 fi
 
 echo -e "${GREEN}Starting FerryTrmnl webhook server...${NC}"
@@ -44,4 +52,4 @@ echo "Press Ctrl+C to stop the server"
 echo ""
 
 # Run the Flask app
-python3 app.py
+python3 web/app.py
