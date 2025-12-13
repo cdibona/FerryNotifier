@@ -36,10 +36,35 @@ FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
 FLASK_PORT = int(os.getenv('FLASK_PORT', 5050))
 FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
 SITE_URL = os.getenv('SITE_URL', '')
+DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL', '')
 
 # Display configuration constants
 MAX_VESSELS_DISPLAY = 5  # Maximum number of vessels to display
 MAX_DEPARTURES_DISPLAY = 10  # Maximum number of departures to display
+
+
+def send_discord_notification(endpoint: str, route_id: str, ip_address: str, user_agent: str):
+    """Send a notification to Discord webhook if configured."""
+    if not DISCORD_WEBHOOK_URL:
+        return
+
+    try:
+        payload = {
+            "embeds": [{
+                "title": "FerryTrmnl API Request",
+                "color": 3447003,  # Blue
+                "fields": [
+                    {"name": "Endpoint", "value": endpoint, "inline": True},
+                    {"name": "Route", "value": route_id or "All", "inline": True},
+                    {"name": "IP Address", "value": ip_address, "inline": True},
+                    {"name": "User Agent", "value": user_agent[:100] if user_agent else "Unknown", "inline": False},
+                ],
+                "timestamp": datetime.now().isoformat()
+            }]
+        }
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
+    except Exception as e:
+        logger.warning(f"Failed to send Discord notification: {e}")
 
 # HTML template for Trmnl display
 TRMNL_TEMPLATE = """
@@ -1036,6 +1061,11 @@ def api_trmnl():
 
     # Get optional route_id from query parameters
     route_id = request.args.get('route_id', FERRY_ROUTE_ID)
+
+    # Send Discord notification if configured
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+    user_agent = request.headers.get('User-Agent', '')
+    send_discord_notification('/api/trmnl', route_id, ip_address, user_agent)
 
     # Fetch and format ferry data
     ferry_data = fetch_ferry_status(route_id)
