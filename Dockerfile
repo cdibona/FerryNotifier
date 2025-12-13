@@ -17,6 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     gcc \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -39,7 +40,7 @@ EXPOSE 5050
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5050/health')" || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:5050/health || exit 1
 
 # Run with gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "4", "--access-logfile", "-", "--error-logfile", "-", "app:app"]

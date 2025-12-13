@@ -35,6 +35,10 @@ FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
 FLASK_PORT = int(os.getenv('FLASK_PORT', 5050))
 FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
 
+# Display configuration constants
+MAX_VESSELS_DISPLAY = 5  # Maximum number of vessels to display
+MAX_DEPARTURES_DISPLAY = 10  # Maximum number of departures to display
+
 # HTML template for Trmnl display
 TRMNL_TEMPLATE = """
 <!DOCTYPE html>
@@ -234,7 +238,7 @@ def format_ferry_data(data: Dict[str, Any]) -> Dict[str, Any]:
     # Process vessel data
     vessels = data.get("vessels", [])
     if isinstance(vessels, list):
-        for vessel in vessels[:5]:  # Limit to 5 vessels for display
+        for vessel in vessels[:MAX_VESSELS_DISPLAY]:
             vessel_info = {
                 "name": vessel.get("VesselName", "Unknown"),
                 "status": vessel.get("InService", "Unknown"),
@@ -252,7 +256,7 @@ def format_ferry_data(data: Dict[str, Any]) -> Dict[str, Any]:
         # Process schedule/departures
         schedule = route_info.get("Schedule", [])
         if isinstance(schedule, list):
-            for dept in schedule[:10]:  # Limit to next 10 departures
+            for dept in schedule[:MAX_DEPARTURES_DISPLAY]:
                 departure_info = {
                     "time": dept.get("DepartingTime", ""),
                     "departing_terminal": dept.get("DepartingTerminal", ""),
