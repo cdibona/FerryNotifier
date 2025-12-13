@@ -30,16 +30,22 @@ def test_app_imports():
 def test_app_routes():
     """Test that all expected routes are registered."""
     from app import app
-    
+
     client = app.test_client()
-    
-    # Test root endpoint
+
+    # Test root endpoint (simulator frontend)
     response = client.get('/')
+    assert response.status_code == 200
+    assert b'TRMNL Webhook Simulator' in response.data
+    assert b'Fetch Webhook' in response.data
+
+    # Test API info endpoint
+    response = client.get('/api/info')
     assert response.status_code == 200
     data = json.loads(response.data)
     assert 'service' in data
     assert 'endpoints' in data
-    
+
     # Test health endpoint
     response = client.get('/health')
     assert response.status_code == 200
