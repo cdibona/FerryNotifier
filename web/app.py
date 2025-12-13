@@ -6,6 +6,7 @@ from the WSDOT Ferries API and formats it for display on Trmnl e-ink devices.
 """
 
 import os
+import re
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -51,51 +52,99 @@ TRMNL_TEMPLATE = """
         body {
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 15px;
             background-color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
         .container {
             max-width: 800px;
             margin: 0 auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
         }
-        h1 {
-            font-size: 24px;
-            margin-bottom: 10px;
-            border-bottom: 2px solid black;
-            padding-bottom: 10px;
+        .header {
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 3px solid black;
         }
-        .route-info {
-            font-size: 18px;
-            margin: 15px 0;
+        .header-brand {
+            color: #333;
+        }
+        .header-route {
+            color: #000;
+        }
+        .vessels-section {
+            flex: 1;
+            margin-top: 10px;
         }
         .vessel-info {
-            margin: 20px 0;
-            padding: 15px;
-            border: 1px solid black;
+            margin: 12px 0;
+            padding: 12px;
+            border: 2px solid black;
+            border-radius: 4px;
         }
         .vessel-name {
-            font-size: 20px;
+            font-size: 18px;
             font-weight: bold;
-            margin-bottom: 10px;
+            margin-bottom: 6px;
         }
-        .status {
-            font-size: 16px;
-            margin: 5px 0;
+        .vessel-status {
+            font-size: 15px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
         }
-        .schedule {
-            margin-top: 20px;
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-weight: bold;
+            font-size: 13px;
         }
-        .departure {
+        .status-sailing {
+            background: #000;
+            color: #fff;
+        }
+        .status-docked {
+            background: #666;
+            color: #fff;
+        }
+        .vessel-location {
             font-size: 14px;
-            padding: 8px;
-            margin: 5px 0;
-            border-left: 3px solid black;
-            padding-left: 10px;
+            margin-top: 4px;
+            color: #333;
+        }
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid #ccc;
+            font-size: 12px;
+            color: #555;
+        }
+        .parking-info {
+            display: flex;
+            gap: 15px;
+        }
+        .terminal-space {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .terminal-name {
+            font-weight: 500;
+        }
+        .space-count {
+            font-weight: bold;
         }
         .update-time {
-            font-size: 12px;
-            color: #666;
-            margin-top: 20px;
             text-align: right;
         }
         .error {
@@ -108,53 +157,40 @@ TRMNL_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>WA State Ferry Status</h1>
+        <div class="header">
+            <span class="header-brand">FerryTrmnl:</span> <span class="header-route">{{ route_name }}</span>
+        </div>
+
         {% if error %}
         <div class="error">{{ error }}</div>
         {% else %}
-        <div class="route-info">
-            <strong>Route:</strong> {{ route_name }}<br>
-            {% if route_description %}
-            <strong>Description:</strong> {{ route_description }}
-            {% endif %}
-        </div>
-        
-        {% if vessels %}
-        <div class="schedule">
-            <h2>Current Vessels</h2>
+
+        <div class="vessels-section">
             {% for vessel in vessels %}
             <div class="vessel-info">
                 <div class="vessel-name">{{ vessel.name }}</div>
-                <div class="status">
-                    <strong>Status:</strong> {{ vessel.status }}<br>
-                    {% if vessel.location %}
-                    <strong>Location:</strong> {{ vessel.location }}<br>
-                    {% endif %}
-                    {% if vessel.eta %}
-                    <strong>ETA:</strong> {{ vessel.eta }}
-                    {% endif %}
+                <div class="vessel-status">
+                    <span class="status-badge {% if vessel.status == 'Sailing' %}status-sailing{% else %}status-docked{% endif %}">{{ vessel.status }}</span>
                 </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        
-        {% if departures %}
-        <div class="schedule">
-            <h2>Upcoming Departures</h2>
-            {% for departure in departures %}
-            <div class="departure">
-                <strong>{{ departure.time }}</strong> - {{ departure.departing_terminal }} to {{ departure.arriving_terminal }}
-                {% if departure.vessel %}
-                <br>Vessel: {{ departure.vessel }}
+                {% if vessel.location %}
+                <div class="vessel-location">{{ vessel.location }}</div>
                 {% endif %}
             </div>
             {% endfor %}
         </div>
-        {% endif %}
-        
-        <div class="update-time">
-            Last updated: {{ update_time }}
+
+        <div class="footer">
+            <div class="parking-info">
+                {% for terminal, space in terminal_spaces.items() %}
+                <div class="terminal-space">
+                    <span class="terminal-name">{{ terminal }}:</span>
+                    <span class="space-count">{{ space.drive_up }}</span> spots
+                </div>
+                {% endfor %}
+            </div>
+            <div class="update-time">
+                Updated {{ update_time }}
+            </div>
         </div>
         {% endif %}
     </div>
@@ -229,15 +265,16 @@ SIMULATOR_TEMPLATE = """
             color: #666;
             font-weight: 500;
         }
-        .form-group input {
+        .form-group input, .form-group select {
             width: 100%;
             padding: 10px 12px;
             border: 2px solid #e0e0e0;
             border-radius: 8px;
             font-size: 14px;
             transition: border-color 0.2s;
+            background-color: white;
         }
-        .form-group input:focus {
+        .form-group input:focus, .form-group select:focus {
             outline: none;
             border-color: #667eea;
         }
@@ -468,8 +505,20 @@ SIMULATOR_TEMPLATE = """
                     <input type="text" id="siteUrl" placeholder="https://your-domain.com" value="{{ site_url }}">
                 </div>
                 <div class="form-group">
-                    <label for="routeId">Route ID (optional)</label>
-                    <input type="text" id="routeId" placeholder="e.g., sea-bi for Seattle-Bainbridge" value="{{ route_id }}">
+                    <label for="routeId">Route (optional)</label>
+                    <select id="routeId">
+                        <option value="">All Routes</option>
+                        <option value="sea-bi"{% if route_id == 'sea-bi' %} selected{% endif %}>Seattle / Bainbridge Island</option>
+                        <option value="sea-br"{% if route_id == 'sea-br' %} selected{% endif %}>Seattle / Bremerton</option>
+                        <option value="ed-king"{% if route_id == 'ed-king' %} selected{% endif %}>Edmonds / Kingston</option>
+                        <option value="muk-cl"{% if route_id == 'muk-cl' %} selected{% endif %}>Mukilteo / Clinton</option>
+                        <option value="f-v-s"{% if route_id == 'f-v-s' %} selected{% endif %}>Fauntleroy / Vashon</option>
+                        <option value="f-s"{% if route_id == 'f-s' %} selected{% endif %}>Fauntleroy / Southworth</option>
+                        <option value="s-v"{% if route_id == 's-v' %} selected{% endif %}>Southworth / Vashon</option>
+                        <option value="pt-key"{% if route_id == 'pt-key' %} selected{% endif %}>Port Townsend / Coupeville</option>
+                        <option value="pd-tal"{% if route_id == 'pd-tal' %} selected{% endif %}>Pt. Defiance / Tahlequah</option>
+                        <option value="ana-sj"{% if route_id == 'ana-sj' %} selected{% endif %}>Anacortes / San Juan Islands</option>
+                    </select>
                 </div>
                 <button class="btn btn-primary" id="fetchBtn" onclick="fetchWebhook()">
                     Fetch Webhook
@@ -543,7 +592,7 @@ SIMULATOR_TEMPLATE = """
 
         // Update webhook URL display when inputs change
         document.getElementById('siteUrl').addEventListener('input', updateWebhookUrl);
-        document.getElementById('routeId').addEventListener('input', updateWebhookUrl);
+        document.getElementById('routeId').addEventListener('change', updateWebhookUrl);
 
         function updateWebhookUrl() {
             const siteUrl = document.getElementById('siteUrl').value.replace(/\\/$/, '');
@@ -689,59 +738,129 @@ SIMULATOR_TEMPLATE = """
         document.getElementById('siteUrl').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') fetchWebhook();
         });
-        document.getElementById('routeId').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') fetchWebhook();
-        });
     </script>
 </body>
 </html>
 """
 
 
+# Route to terminals mapping
+ROUTE_TERMINALS = {
+    "sea-bi": ["Seattle", "Bainbridge Island"],
+    "sea-br": ["Seattle", "Bremerton"],
+    "ed-king": ["Edmonds", "Kingston"],
+    "muk-cl": ["Mukilteo", "Clinton"],
+    "f-v-s": ["Fauntleroy", "Vashon Island"],
+    "f-s": ["Fauntleroy", "Southworth"],
+    "s-v": ["Southworth", "Vashon Island"],
+    "pt-key": ["Port Townsend", "Coupeville"],
+    "pd-tal": ["Point Defiance", "Tahlequah"],
+    "ana-sj": ["Anacortes", "Friday Harbor", "Orcas Island", "Lopez Island", "Shaw Island"],
+}
+
+ROUTE_NAMES = {
+    "sea-bi": "Seattle / Bainbridge Island",
+    "sea-br": "Seattle / Bremerton",
+    "ed-king": "Edmonds / Kingston",
+    "muk-cl": "Mukilteo / Clinton",
+    "f-v-s": "Fauntleroy / Vashon",
+    "f-s": "Fauntleroy / Southworth",
+    "s-v": "Southworth / Vashon",
+    "pt-key": "Port Townsend / Coupeville",
+    "pd-tal": "Pt. Defiance / Tahlequah",
+    "ana-sj": "Anacortes / San Juan Islands",
+}
+
+
+def parse_wsdot_date(date_str: Optional[str]) -> Optional[datetime]:
+    """Parse WSDOT API date format like /Date(1765655700000-0800)/"""
+    if not date_str or date_str == "None":
+        return None
+    try:
+        # Extract timestamp from /Date(1234567890000-0800)/
+        match = re.search(r'/Date\((\d+)([+-]\d{4})?\)/', str(date_str))
+        if match:
+            timestamp_ms = int(match.group(1))
+            return datetime.fromtimestamp(timestamp_ms / 1000)
+    except Exception:
+        pass
+    return None
+
+
 def fetch_ferry_status(route_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Fetch ferry status from WSDOT API.
-    
+
     Args:
         route_id: Optional specific route ID to fetch
-        
+
     Returns:
         Dictionary containing ferry status data
     """
     if not WSDOT_API_KEY:
         logger.error("WSDOT_API_KEY not configured")
         return {"error": "API key not configured"}
-    
+
     route = route_id or FERRY_ROUTE_ID
-    
+    params = {"apiaccesscode": WSDOT_API_KEY}
+
     try:
         # Fetch vessel locations
         vessels_url = f"{WSDOT_API_BASE_URL}/vessels/rest/vessellocations"
-        params = {"apiaccesscode": WSDOT_API_KEY}
-        
-        logger.info(f"Fetching vessel locations from WSDOT API")
+
+        logger.info(f"Fetching vessel locations from WSDOT API for route: {route or 'all'}")
         response = requests.get(vessels_url, params=params, timeout=10)
         response.raise_for_status()
-        
+
         vessels_data = response.json()
-        
-        # If route_id is specified, fetch route-specific information
-        route_info = {}
-        if route:
-            try:
-                route_url = f"{WSDOT_API_BASE_URL}/schedule/rest/schedule/{route}"
-                route_response = requests.get(route_url, params=params, timeout=10)
-                route_response.raise_for_status()
-                route_info = route_response.json()
-            except Exception as e:
-                logger.warning(f"Could not fetch route-specific data: {e}")
-        
+
+        # Filter vessels by route if specified
+        terminals = []
+        if route and route in ROUTE_TERMINALS:
+            terminals = ROUTE_TERMINALS[route]
+            filtered_vessels = []
+            for vessel in vessels_data:
+                dep_terminal = vessel.get("DepartingTerminalName", "")
+                arr_terminal = vessel.get("ArrivingTerminalName", "")
+                # Vessel is on this route if BOTH terminals are in the route's terminal list
+                if dep_terminal in terminals and arr_terminal in terminals:
+                    filtered_vessels.append(vessel)
+            vessels_data = filtered_vessels
+
+        # Fetch terminal space/parking data
+        terminal_spaces = {}
+        try:
+            space_url = f"{WSDOT_API_BASE_URL.replace('/ferries/api', '/ferries/api/terminals')}/rest/terminalsailingspace"
+            space_response = requests.get(space_url, params=params, timeout=10)
+            space_response.raise_for_status()
+            space_data = space_response.json()
+
+            for terminal in space_data:
+                terminal_name = terminal.get("TerminalName", "")
+                if not terminals or terminal_name in terminals:
+                    # Get the next departure's space info
+                    departing_spaces = terminal.get("DepartingSpaces", [])
+                    if departing_spaces:
+                        next_departure = departing_spaces[0]
+                        space_info = next_departure.get("SpaceForArrivalTerminals", [])
+                        if space_info:
+                            spaces = space_info[0]
+                            terminal_spaces[terminal_name] = {
+                                "drive_up": spaces.get("DriveUpSpaceCount", 0),
+                                "max": spaces.get("MaxSpaceCount", 0),
+                                "color": spaces.get("DriveUpSpaceHexColor", "#888888")
+                            }
+        except Exception as e:
+            logger.warning(f"Could not fetch terminal space data: {e}")
+
         return {
             "vessels": vessels_data,
-            "route_info": route_info,
+            "route_id": route,
+            "route_name": ROUTE_NAMES.get(route, "Washington State Ferries") if route else "All Routes",
+            "terminal_spaces": terminal_spaces,
             "timestamp": datetime.now().isoformat()
         }
-        
+
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching ferry data: {e}")
         return {"error": f"Failed to fetch ferry data: {str(e)}"}
@@ -753,54 +872,74 @@ def fetch_ferry_status(route_id: Optional[str] = None) -> Dict[str, Any]:
 def format_ferry_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Format ferry data for display on Trmnl.
-    
+
     Args:
         data: Raw ferry data from API
-        
+
     Returns:
         Formatted data dictionary for template rendering
     """
     if "error" in data:
         return {"error": data["error"]}
-    
+
     formatted = {
-        "route_name": "Washington State Ferries",
+        "route_name": data.get("route_name", "Washington State Ferries"),
         "route_description": "",
         "vessels": [],
         "departures": [],
-        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "terminal_spaces": data.get("terminal_spaces", {}),
+        "update_time": datetime.now().strftime("%I:%M %p").lstrip("0")
     }
-    
+
     # Process vessel data
     vessels = data.get("vessels", [])
     if isinstance(vessels, list):
         for vessel in vessels[:MAX_VESSELS_DISPLAY]:
+            vessel_name = vessel.get("VesselName", "Unknown")
+            in_service = vessel.get("InService", False)
+            at_dock = vessel.get("AtDock", False)
+            dep_terminal = vessel.get("DepartingTerminalName", "")
+            arr_terminal = vessel.get("ArrivingTerminalName", "")
+            speed = vessel.get("Speed", 0)
+
+            # Build status text
+            if not in_service:
+                status = "Out of service"
+                location = ""
+            elif at_dock:
+                status = "Docked"
+                location = f"At {dep_terminal}"
+                # Add scheduled departure if available
+                sched_dep = parse_wsdot_date(vessel.get("ScheduledDeparture"))
+                if sched_dep:
+                    location += f", departs {sched_dep.strftime('%I:%M %p').lstrip('0')}"
+            else:
+                status = "Sailing"
+                location = f"{dep_terminal} → {arr_terminal}"
+                # Add ETA if available
+                eta = parse_wsdot_date(vessel.get("Eta"))
+                if eta:
+                    location += f" (ETA {eta.strftime('%I:%M %p').lstrip('0')})"
+                elif speed:
+                    location += f" ({speed:.1f} kts)"
+
             vessel_info = {
-                "name": vessel.get("VesselName", "Unknown"),
-                "status": vessel.get("InService", "Unknown"),
-                "location": vessel.get("AtDock", ""),
-                "eta": vessel.get("LeftDock", "")
+                "name": vessel_name,
+                "status": status,
+                "location": location,
+                "eta": ""
             }
             formatted["vessels"].append(vessel_info)
-    
-    # Process route info if available
-    route_info = data.get("route_info", {})
-    if route_info:
-        formatted["route_name"] = route_info.get("RouteName", formatted["route_name"])
-        formatted["route_description"] = route_info.get("Description", "")
-        
-        # Process schedule/departures
-        schedule = route_info.get("Schedule", [])
-        if isinstance(schedule, list):
-            for dept in schedule[:MAX_DEPARTURES_DISPLAY]:
-                departure_info = {
-                    "time": dept.get("DepartingTime", ""),
-                    "departing_terminal": dept.get("DepartingTerminal", ""),
-                    "arriving_terminal": dept.get("ArrivingTerminal", ""),
-                    "vessel": dept.get("VesselName", "")
-                }
-                formatted["departures"].append(departure_info)
-    
+
+    # If no vessels found, add a message
+    if not formatted["vessels"]:
+        formatted["vessels"].append({
+            "name": "No vessels",
+            "status": "No active vessels found for this route",
+            "location": "",
+            "eta": ""
+        })
+
     return formatted
 
 

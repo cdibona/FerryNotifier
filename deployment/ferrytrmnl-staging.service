@@ -1,0 +1,60 @@
+# Systemd service file for FerryTrmnl (Staging)
+# Place this file in /etc/systemd/system/ferrytrmnl.service
+#
+# Installation:
+# 1. Copy this file: sudo cp deployment/ferrytrmnl-staging.service /etc/systemd/system/ferrytrmnl.service
+# 2. Reload systemd: sudo systemctl daemon-reload
+# 3. Enable service: sudo systemctl enable ferrytrmnl
+# 4. Start service: sudo systemctl start ferrytrmnl
+# 5. Check status: sudo systemctl status ferrytrmnl
+
+[Unit]
+Description=FerryTrmnl Washington State Ferry Status Webhook Server (Staging)
+Documentation=https://github.com/cdibona/FerryTrmnl
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# User and group to run as
+User=cdibona
+Group=cdibona
+
+# Working directory
+WorkingDirectory=/home/cdibona/FerryTrmnl/web
+
+# Environment variables
+Environment="PATH=/home/cdibona/FerryTrmnl/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/home/cdibona/FerryTrmnl/.env
+
+# Command to run (using gunicorn for production)
+# Adjust the number of workers (-w) based on your server's CPU cores
+# Formula: (2 x CPU cores) + 1
+ExecStart=/home/cdibona/FerryTrmnl/venv/bin/gunicorn \
+    --workers 4 \
+    --bind 127.0.0.1:5050 \
+    --access-logfile /var/log/ferrytrmnl/access.log \
+    --error-logfile /var/log/ferrytrmnl/error.log \
+    --log-level info \
+    --timeout 60 \
+    app:app
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=200
+StartLimitBurst=5
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log/ferrytrmnl
+
+# Resource limits
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
