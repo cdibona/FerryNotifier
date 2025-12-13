@@ -1011,14 +1011,33 @@ def api_ferry_status():
     Returns raw ferry status data in JSON format.
     """
     logger.info("API endpoint called")
-    
+
     # Get optional route_id from query parameters
     route_id = request.args.get('route_id', FERRY_ROUTE_ID)
-    
+
     # Fetch ferry data
     ferry_data = fetch_ferry_status(route_id)
-    
+
     return jsonify(ferry_data)
+
+
+@app.route('/api/trmnl', methods=['GET'])
+def api_trmnl():
+    """
+    TRMNL polling endpoint.
+    Returns JSON data formatted for TRMNL's Liquid templating.
+    """
+    logger.info("TRMNL polling endpoint called")
+
+    # Get optional route_id from query parameters
+    route_id = request.args.get('route_id', FERRY_ROUTE_ID)
+
+    # Fetch and format ferry data
+    ferry_data = fetch_ferry_status(route_id)
+    formatted_data = format_ferry_data(ferry_data)
+
+    # Return JSON for TRMNL polling
+    return jsonify(formatted_data)
 
 
 def main():

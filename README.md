@@ -202,36 +202,64 @@ Fill in the following fields:
 | Setting | Value | Notes |
 |---------|-------|-------|
 | **Plugin Name** | `Washington State Ferries` | Or any name you prefer |
-| **Strategy** | `Polling` | TRMNL fetches data from your server |
-| **Polling URL** | `https://your-domain.com/webhook?route_id=sea-bi` | Your server URL with route |
-| **Polling Verb** | `GET` | FerryTrmnl uses GET requests |
+| **Strategy** | `Polling` | TRMNL fetches JSON data from your server |
+| **Polling URL** | `https://your-domain.com/api/trmnl?route_id=sea-bi` | Use `/api/trmnl` endpoint |
+| **Polling Verb** | `GET` | |
 | **Polling Headers** | *(leave empty)* | No authentication required |
 | **Refresh Rate** | `15 minutes` | Recommended: 15-30 minutes |
 
-**Note:** This is a **Polling** plugin (TRMNL pulls data from your server), not a Webhook plugin (where TRMNL would push data to you).
+**Note:** Use the `/api/trmnl` endpoint (returns JSON), not `/webhook` (returns HTML).
 
 ### Step 5: Configure Polling URL with Route
-
-To display a specific ferry route, add the `route_id` query parameter to your polling URL.
 
 **Polling URL Examples:**
 
 | Route | Polling URL |
 |-------|-------------|
-| Seattle / Bainbridge | `https://your-domain.com/webhook?route_id=sea-bi` |
-| Seattle / Bremerton | `https://your-domain.com/webhook?route_id=sea-br` |
-| Edmonds / Kingston | `https://your-domain.com/webhook?route_id=ed-king` |
-| Mukilteo / Clinton | `https://your-domain.com/webhook?route_id=muk-cl` |
-| Fauntleroy / Vashon | `https://your-domain.com/webhook?route_id=f-v-s` |
-| Fauntleroy / Southworth | `https://your-domain.com/webhook?route_id=f-s` |
-| Southworth / Vashon | `https://your-domain.com/webhook?route_id=s-v` |
-| Port Townsend / Coupeville | `https://your-domain.com/webhook?route_id=pt-key` |
-| Pt. Defiance / Tahlequah | `https://your-domain.com/webhook?route_id=pd-tal` |
-| Anacortes / San Juan Islands | `https://your-domain.com/webhook?route_id=ana-sj` |
+| Seattle / Bainbridge | `https://your-domain.com/api/trmnl?route_id=sea-bi` |
+| Seattle / Bremerton | `https://your-domain.com/api/trmnl?route_id=sea-br` |
+| Edmonds / Kingston | `https://your-domain.com/api/trmnl?route_id=ed-king` |
+| Mukilteo / Clinton | `https://your-domain.com/api/trmnl?route_id=muk-cl` |
+| Fauntleroy / Vashon | `https://your-domain.com/api/trmnl?route_id=f-v-s` |
+| Fauntleroy / Southworth | `https://your-domain.com/api/trmnl?route_id=f-s` |
+| Southworth / Vashon | `https://your-domain.com/api/trmnl?route_id=s-v` |
+| Port Townsend / Coupeville | `https://your-domain.com/api/trmnl?route_id=pt-key` |
+| Pt. Defiance / Tahlequah | `https://your-domain.com/api/trmnl?route_id=pd-tal` |
+| Anacortes / San Juan Islands | `https://your-domain.com/api/trmnl?route_id=ana-sj` |
 
-**Note:** If you omit `route_id`, the webhook will show all vessels (not recommended for e-ink display).
+### Step 6: Add Markup Template
 
-### Step 6: Save and Test
+In TRMNL's **Markup Editor**, paste this Liquid template:
+
+```liquid
+<div class="layout">
+  <div class="title">FerryTrmnl: {{ route_name }}</div>
+  <div class="content">
+    {% for vessel in vessels %}
+    <div class="item">
+      <span class="primary_text">{{ vessel.name }}</span>
+      <span class="label label--small">{{ vessel.status }}</span>
+      {% if vessel.location != "" %}
+      <div class="description">{{ vessel.location }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="footer">
+    <span class="label">
+      {% for space in terminal_spaces %}
+      {{ space[0] }}: {{ space[1].drive_up }} spots
+      {% unless forloop.last %} | {% endunless %}
+      {% endfor %}
+    </span>
+    <span class="label">Updated {{ update_time }}</span>
+  </div>
+</div>
+```
+
+This template uses TRMNL's built-in CSS classes for proper e-ink formatting.
+
+### Step 7: Save and Test
 
 1. Click **"Save"** to create the plugin
 2. Click **"Test Plugin"** or **"Preview"** to verify it works

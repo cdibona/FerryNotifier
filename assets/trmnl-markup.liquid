@@ -1,0 +1,23 @@
+<div class="layout">
+  <div class="title">FerryTrmnl: {{ route_name }}</div>
+  <div class="content">
+    {% for vessel in vessels %}
+    <div class="item">
+      <span class="primary_text">{{ vessel.name }}</span>
+      <span class="label label--small">{{ vessel.status }}</span>
+      {% if vessel.location != "" %}
+      <div class="description">{{ vessel.location }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="footer">
+    <span class="label">
+      {% for space in terminal_spaces %}
+      {{ space[0] }}: {{ space[1].drive_up }} spots
+      {% unless forloop.last %} | {% endunless %}
+      {% endfor %}
+    </span>
+    <span class="label">Updated {{ update_time }}</span>
+  </div>
+</div>
