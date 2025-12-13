@@ -560,8 +560,13 @@ SIMULATOR_TEMPLATE = """
             <div class="endpoint-list">
                 <div class="endpoint-item">
                     <span class="endpoint-method">GET</span>
-                    <span class="endpoint-path">/webhook</span>
-                    <span class="endpoint-desc">Main TRMNL webhook (HTML)</span>
+                    <span class="endpoint-path">/api/trmnl</span>
+                    <span class="endpoint-desc">TRMNL polling (JSON)</span>
+                </div>
+                <div class="endpoint-item">
+                    <span class="endpoint-method">GET</span>
+                    <span class="endpoint-path">/api/trmnl/preview</span>
+                    <span class="endpoint-desc">TRMNL preview (HTML)</span>
                 </div>
                 <div class="endpoint-item">
                     <span class="endpoint-method">GET</span>
@@ -591,7 +596,7 @@ SIMULATOR_TEMPLATE = """
             const siteUrl = document.getElementById('siteUrl').value.replace(/\\/$/, '');
             const routeId = document.getElementById('routeId').value.trim();
 
-            let webhookUrl = siteUrl + '/webhook';
+            let webhookUrl = siteUrl + '/api/trmnl';
             if (routeId) {
                 webhookUrl += '?route_id=' + encodeURIComponent(routeId);
             }
@@ -627,7 +632,7 @@ SIMULATOR_TEMPLATE = """
                 return;
             }
 
-            let webhookUrl = siteUrl + '/webhook';
+            let webhookUrl = siteUrl + '/api/trmnl/preview';
             if (routeId) {
                 webhookUrl += '?route_id=' + encodeURIComponent(routeId);
             }
@@ -1038,6 +1043,123 @@ def api_trmnl():
 
     # Return JSON for TRMNL polling
     return jsonify(formatted_data)
+
+
+# TRMNL-style template (mimics what TRMNL renders with Liquid)
+TRMNL_PREVIEW_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: white;
+            color: black;
+            padding: 16px;
+        }
+        .layout { }
+        .title {
+            font-size: 20px;
+            font-weight: bold;
+            padding-bottom: 8px;
+            border-bottom: 2px solid black;
+            margin-bottom: 12px;
+        }
+        .content { }
+        .item {
+            padding: 10px 0;
+            border-bottom: 1px solid #ccc;
+        }
+        .item:last-child {
+            border-bottom: none;
+        }
+        .primary_text {
+            font-size: 18px;
+            font-weight: bold;
+            display: block;
+            margin-bottom: 4px;
+        }
+        .label {
+            display: inline-block;
+            background: black;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .label--small {
+            font-size: 11px;
+            padding: 1px 6px;
+        }
+        .description {
+            font-size: 14px;
+            color: #333;
+            margin-top: 4px;
+        }
+        .footer {
+            margin-top: 16px;
+            padding-top: 10px;
+            border-top: 1px solid #ccc;
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+        }
+        .footer .label {
+            background: transparent;
+            color: #555;
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="layout">
+        <div class="title">FerryTrmnl: {{ route_name }}</div>
+        <div class="content">
+            {% for vessel in vessels %}
+            <div class="item">
+                <span class="primary_text">{{ vessel.name }}</span>
+                <span class="label label--small">{{ vessel.status }}</span>
+                {% if vessel.location %}
+                <div class="description">{{ vessel.location }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="footer">
+            <span class="label">
+                {% for terminal, space in terminal_spaces.items() %}
+                {{ terminal }}: {{ space.drive_up }} spots{% if not loop.last %} | {% endif %}
+                {% endfor %}
+            </span>
+            <span class="label">Updated {{ update_time }}</span>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+
+@app.route('/api/trmnl/preview', methods=['GET'])
+def api_trmnl_preview():
+    """
+    TRMNL preview endpoint.
+    Returns HTML rendered like TRMNL would display it.
+    """
+    logger.info("TRMNL preview endpoint called")
+
+    # Get optional route_id from query parameters
+    route_id = request.args.get('route_id', FERRY_ROUTE_ID)
+
+    # Fetch and format ferry data
+    ferry_data = fetch_ferry_status(route_id)
+    formatted_data = format_ferry_data(ferry_data)
+
+    # Render with TRMNL-style template
+    html = render_template_string(TRMNL_PREVIEW_TEMPLATE, **formatted_data)
+    return html
 
 
 def main():
