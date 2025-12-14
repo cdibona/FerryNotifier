@@ -227,81 +227,149 @@ Fill in the following fields:
 | Pt. Defiance / Tahlequah | `https://your-domain.com/api/trmnl?route_id=pd-tal` |
 | Anacortes / San Juan Islands | `https://your-domain.com/api/trmnl?route_id=ana-sj` |
 
-### Step 6: Add Markup Template
+### Step 6: Add Markup Templates
 
-In TRMNL's **Markup Editor**, paste this Liquid template:
+In TRMNL's **Markup Editor**, you'll see tabs for different layout sizes. Paste the appropriate template into each tab:
+
+**Important:** Do NOT include `<div class="view view--full">` wrapper - TRMNL adds this automatically.
+
+#### Full Layout Tab
 
 ```liquid
-<div class="view view--full">
-  <div class="layout">
-    <div class="columns">
-      <div class="column">
-        <div class="markdown">
-          <div class="content">
-            <span class="title">{{ route_name }}</span>
-          </div>
-          {% for vessel in vessels %}
-          <div class="content" style="margin-top: 16px; padding: 12px; border: 2px solid #000;">
-            <span class="title" style="font-size: 24px;">{{ vessel.name }}</span>
-            <span class="label">{{ vessel.status }}</span>
-            {% if vessel.location != "" %}
-            <p style="margin-top: 8px;">{{ vessel.location }}</p>
-            {% endif %}
-          </div>
+<div class="layout">
+  <div class="columns">
+    <div class="column">
+      <span class="title title--large">{{ route_name }}</span>
+      {% for vessel in vessels %}
+      <div class="content" style="margin-top: 12px; padding: 8px; border: 2px solid #000;">
+        <span class="title">{{ vessel.name }}</span>
+        <span class="label">{{ vessel.status }}</span>
+        <p style="margin-top: 4px;">{{ vessel.location }}</p>
+      </div>
+      {% endfor %}
+      <div class="content" style="margin-top: 12px;">
+        <span class="label">
+          {% for space in terminal_spaces %}
+          {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
           {% endfor %}
-          <div class="content" style="margin-top: 16px;">
-            <span class="label">
-              {% for space in terminal_spaces %}
-              {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
-              {% endfor %}
-            </span>
-          </div>
-        </div>
+        </span>
       </div>
     </div>
   </div>
-  <div class="title_bar">
-    <span class="title">FerryTrmnl</span>
-    <span class="instance">Updated {{ update_time }}</span>
-  </div>
+</div>
+<div class="title_bar">
+  <span class="title">FerryTrmnl</span>
+  <span class="instance">{{ update_time }}</span>
 </div>
 ```
 
-This template uses TRMNL's required structure (`view--full`, `layout`, `columns`, `title_bar`) for proper rendering.
+#### Half Horizontal Layout Tab
+
+```liquid
+<div class="layout">
+  <span class="title">{{ route_name }}</span>
+  {% for vessel in vessels %}
+  <div class="content">
+    <span class="label">{{ vessel.name }} - {{ vessel.status }} - {{ vessel.location }}</span>
+  </div>
+  {% endfor %}
+  <span class="label label--small">{% for space in terminal_spaces %}{{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}{% endfor %}</span>
+</div>
+<div class="title_bar">
+  <span class="title">FerryTrmnl</span>
+  <span class="instance">{{ update_time }}</span>
+</div>
+```
+
+#### Half Vertical Layout Tab
+
+```liquid
+<div class="layout">
+  <span class="title title--small">{{ route_name }}</span>
+  {% for vessel in vessels %}
+  <div class="content" style="margin-top: 6px; padding: 6px; border: 1px solid #000;">
+    <span class="label">{{ vessel.name }}</span>
+    <span class="label label--small">{{ vessel.status }}</span>
+    <p>{{ vessel.location }}</p>
+  </div>
+  {% endfor %}
+  <span class="label label--small" style="margin-top: 6px;">
+    {% for space in terminal_spaces %}
+    {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
+    {% endfor %}
+  </span>
+</div>
+<div class="title_bar">
+  <span class="title">FerryTrmnl</span>
+  <span class="instance">{{ update_time }}</span>
+</div>
+```
+
+#### Quadrant Layout Tab
+
+```liquid
+<div class="layout">
+  <span class="label">{{ route_name }}</span>
+  {% for vessel in vessels %}
+  <div class="content" style="margin-top: 4px; padding: 4px; border: 1px solid #000;">
+    <span class="label label--small">{{ vessel.name }}</span>
+    <span class="label label--small">{{ vessel.status }}</span>
+    <p>{{ vessel.location }}</p>
+  </div>
+  {% endfor %}
+  <span class="label label--small">
+    {% for space in terminal_spaces %}
+    {{ space[0] }}: {{ space[1].drive_up }}{% unless forloop.last %} | {% endunless %}
+    {% endfor %}
+  </span>
+</div>
+<div class="title_bar">
+  <span class="title">Ferry</span>
+</div>
+```
+
+All templates are also available in [`assets/trmnl-markup.liquid`](assets/trmnl-markup.liquid).
 
 ### Step 7: Save and Test
 
-1. Click **"Save"** to create the plugin
-2. Click **"Test Plugin"** or **"Preview"** to verify it works
-3. You should see the ferry status HTML rendered
+1. Click **"Save"** to create/update the plugin
+2. Click **"Force Refresh"** or **"Test Plugin"** to fetch new data
+3. Click **"Preview"** to verify the display looks correct
 
-### Step 7: Assign to Device
+### Step 8: Assign to Device
 
 1. Go to your device settings
 2. Add the new plugin to your device's playlist
 3. Configure the display duration and position
 
-### Step 8: Verify Display
+### Step 9: Verify Display
 
 1. Wait for the next refresh cycle (or force a refresh on your device)
 2. Verify the ferry status displays correctly on your Trmnl e-ink screen
 
 ### Troubleshooting Trmnl Integration
 
+**"Full view not available" error:**
+- This means the Markup Editor's **Full** layout tab is empty or has invalid markup
+- Go to your plugin settings and click on the **"Full"** tab in the Markup Editor
+- Paste the Liquid template for Full Layout above
+- Click **Save**, then **Force Refresh**
+
 **Plugin shows "Error" or blank screen:**
-- Verify your webhook URL is accessible from the internet
+- Verify your polling URL is accessible from the internet
 - Check that HTTPS is properly configured
-- Test the URL manually: `curl https://your-domain.com/webhook`
+- Test the URL manually: `curl https://your-domain.com/api/trmnl?route_id=sea-bi`
 - Check server logs for errors
 
 **Data not updating:**
 - Verify the polling interval is set correctly
+- Click **"Force Refresh"** in TRMNL to manually fetch new data
 - Check that your WSDOT API key is valid
 - Review server logs for API errors
 
 **Display formatting issues:**
-- The HTML is optimized for Trmnl e-ink displays
-- Ensure no CSS overrides are applied in Trmnl settings
+- Make sure you're using the Liquid templates from this README
+- Templates use TRMNL's native CSS classes for proper e-ink rendering
 
 ## Production Deployment
 

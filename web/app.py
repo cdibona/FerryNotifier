@@ -1089,36 +1089,31 @@ TRMNL_PREVIEW_TEMPLATE = """
 <body class="environment trmnl">
     <div class="screen">
         <div class="view view--full">
-            <div class="layout">
-                <div class="columns">
-                    <div class="column">
-                        <div class="markdown">
-                            <div class="content">
-                                <span class="title">{{ route_name }}</span>
-                            </div>
-                            {% for vessel in vessels %}
-                            <div class="content" style="margin-top: 16px; padding: 12px; border: 2px solid #000;">
-                                <span class="title" style="font-size: 24px;">{{ vessel.name }}</span>
-                                <span class="label">{{ vessel.status }}</span>
-                                {% if vessel.location %}
-                                <p style="margin-top: 8px;">{{ vessel.location }}</p>
-                                {% endif %}
-                            </div>
-                            {% endfor %}
-                            <div class="content" style="margin-top: 16px;">
-                                <span class="label">
-                                    {% for terminal, space in terminal_spaces.items() %}
-                                    {{ terminal }}: {{ space.drive_up }} spots{% if not loop.last %} | {% endif %}
-                                    {% endfor %}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
+            <div class="layout layout--col">
+                <div class="gap gap--12">
+                    <span class="title title--40">{{ route_name }}</span>
+                </div>
+                {% for vessel in vessels %}
+                <div class="gap gap--4">
+                    <span class="title title--24">{{ vessel.name }}</span>
+                    <span class="label label--gray">{{ vessel.status }}</span>
+                    {% if vessel.location %}
+                    <span class="description">{{ vessel.location }}</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                <div class="divider"></div>
+                <div class="gap gap--4">
+                    <span class="label">
+                        {% for terminal, space in terminal_spaces.items() %}
+                        {{ terminal }}: {{ space.drive_up }} spots{% if not loop.last %} | {% endif %}
+                        {% endfor %}
+                    </span>
                 </div>
             </div>
             <div class="title_bar">
                 <span class="title">FerryTrmnl</span>
-                <span class="instance">Updated {{ update_time }}</span>
+                <span class="instance">{{ update_time }}</span>
             </div>
         </div>
     </div>

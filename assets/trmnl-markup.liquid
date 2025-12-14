@@ -1,33 +1,100 @@
-<div class="view view--full">
-  <div class="layout">
-    <div class="columns">
-      <div class="column">
-        <div class="markdown">
-          <div class="content">
-            <span class="title">{{ route_name }}</span>
-          </div>
-          {% for vessel in vessels %}
-          <div class="content" style="margin-top: 16px; padding: 12px; border: 2px solid #000;">
-            <span class="title" style="font-size: 24px;">{{ vessel.name }}</span>
-            <span class="label">{{ vessel.status }}</span>
-            {% if vessel.location != "" %}
-            <p style="margin-top: 8px;">{{ vessel.location }}</p>
-            {% endif %}
-          </div>
+# TRMNL Markup Templates for FerryTrmnl
+# Copy each section into the corresponding tab in TRMNL's Markup Editor
+
+# ============================================
+# FULL LAYOUT - paste in "Full" tab
+# ============================================
+
+<div class="layout">
+  <div class="columns">
+    <div class="column">
+      <span class="title title--large">{{ route_name }}</span>
+      {% for vessel in vessels %}
+      <div class="content" style="margin-top: 12px; padding: 8px; border: 2px solid #000;">
+        <span class="title">{{ vessel.name }}</span>
+        <span class="label">{{ vessel.status }}</span>
+        <p style="margin-top: 4px;">{{ vessel.location }}</p>
+      </div>
+      {% endfor %}
+      <div class="content" style="margin-top: 12px;">
+        <span class="label">
+          {% for space in terminal_spaces %}
+          {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
           {% endfor %}
-          <div class="content" style="margin-top: 16px;">
-            <span class="label">
-              {% for space in terminal_spaces %}
-              {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
-              {% endfor %}
-            </span>
-          </div>
-        </div>
+        </span>
       </div>
     </div>
   </div>
-  <div class="title_bar">
-    <span class="title">FerryTrmnl</span>
-    <span class="instance">Updated {{ update_time }}</span>
+</div>
+<div class="title_bar">
+  <span class="title">FerryTrmnl</span>
+  <span class="instance">{{ update_time }}</span>
+</div>
+
+
+# ============================================
+# HALF HORIZONTAL LAYOUT - paste in "Half Horizontal" tab
+# ============================================
+
+<div class="layout">
+  <span class="title">{{ route_name }}</span>
+  {% for vessel in vessels %}
+  <div class="content">
+    <span class="label">{{ vessel.name }} - {{ vessel.status }} - {{ vessel.location }}</span>
   </div>
+  {% endfor %}
+  <span class="label label--small">{% for space in terminal_spaces %}{{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}{% endfor %}</span>
+</div>
+<div class="title_bar">
+  <span class="title">FerryTrmnl</span>
+  <span class="instance">{{ update_time }}</span>
+</div>
+
+
+# ============================================
+# HALF VERTICAL LAYOUT - paste in "Half Vertical" tab
+# ============================================
+
+<div class="layout">
+  <span class="title title--small">{{ route_name }}</span>
+  {% for vessel in vessels %}
+  <div class="content" style="margin-top: 6px; padding: 6px; border: 1px solid #000;">
+    <span class="label">{{ vessel.name }}</span>
+    <span class="label label--small">{{ vessel.status }}</span>
+    <p>{{ vessel.location }}</p>
+  </div>
+  {% endfor %}
+  <span class="label label--small" style="margin-top: 6px;">
+    {% for space in terminal_spaces %}
+    {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
+    {% endfor %}
+  </span>
+</div>
+<div class="title_bar">
+  <span class="title">FerryTrmnl</span>
+  <span class="instance">{{ update_time }}</span>
+</div>
+
+
+# ============================================
+# QUADRANT LAYOUT - paste in "Quadrant" tab
+# ============================================
+
+<div class="layout">
+  <span class="label">{{ route_name }}</span>
+  {% for vessel in vessels %}
+  <div class="content" style="margin-top: 4px; padding: 4px; border: 1px solid #000;">
+    <span class="label label--small">{{ vessel.name }}</span>
+    <span class="label label--small">{{ vessel.status }}</span>
+    <p>{{ vessel.location }}</p>
+  </div>
+  {% endfor %}
+  <span class="label label--small">
+    {% for space in terminal_spaces %}
+    {{ space[0] }}: {{ space[1].drive_up }}{% unless forloop.last %} | {% endunless %}
+    {% endfor %}
+  </span>
+</div>
+<div class="title_bar">
+  <span class="title">Ferry</span>
 </div>
