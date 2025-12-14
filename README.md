@@ -285,19 +285,25 @@ In TRMNL's **Markup Editor**, you'll see tabs for different layout sizes. Paste 
 
 ```liquid
 <div class="layout">
-  <span class="title title--small">{{ route_name }}</span>
-  {% for vessel in vessels %}
-  <div class="content" style="margin-top: 6px; padding: 6px; border: 1px solid #000;">
-    <span class="label">{{ vessel.name }}</span>
-    <span class="label label--small">{{ vessel.status }}</span>
-    <p>{{ vessel.location }}</p>
+  <div class="columns">
+    <div class="column">
+      <span class="title title--small">{{ route_name }}</span>
+      {% for vessel in vessels %}
+      <div class="content" style="margin-top: 6px; padding: 6px; border: 1px solid #000;">
+        <span class="label">{{ vessel.name }}</span>
+        <span class="label label--small">{{ vessel.status }}</span>
+        <p>{{ vessel.location }}</p>
+      </div>
+      {% endfor %}
+      <div class="content" style="margin-top: 6px;">
+        <span class="label label--small">
+          {% for space in terminal_spaces %}
+          {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
+          {% endfor %}
+        </span>
+      </div>
+    </div>
   </div>
-  {% endfor %}
-  <span class="label label--small" style="margin-top: 6px;">
-    {% for space in terminal_spaces %}
-    {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
-    {% endfor %}
-  </span>
 </div>
 <div class="title_bar">
   <span class="title">FerryTrmnl</span>
@@ -309,19 +315,23 @@ In TRMNL's **Markup Editor**, you'll see tabs for different layout sizes. Paste 
 
 ```liquid
 <div class="layout">
-  <span class="label">{{ route_name }}</span>
-  {% for vessel in vessels %}
-  <div class="content" style="margin-top: 4px; padding: 4px; border: 1px solid #000;">
-    <span class="label label--small">{{ vessel.name }}</span>
-    <span class="label label--small">{{ vessel.status }}</span>
-    <p>{{ vessel.location }}</p>
+  <div class="columns">
+    <div class="column">
+      <span class="label">{{ route_name }}</span>
+      {% for vessel in vessels %}
+      <div class="content" style="margin-top: 4px; padding: 4px; border: 1px solid #000;">
+        <span class="label label--small">{{ vessel.name }}</span>
+        <span class="label label--small">{{ vessel.status }}</span>
+        <p>{{ vessel.location }}</p>
+      </div>
+      {% endfor %}
+      <span class="label label--small" style="margin-top: 4px;">
+        {% for space in terminal_spaces %}
+        {{ space[0] }}: {{ space[1].drive_up }}{% unless forloop.last %} | {% endunless %}
+        {% endfor %}
+      </span>
+    </div>
   </div>
-  {% endfor %}
-  <span class="label label--small">
-    {% for space in terminal_spaces %}
-    {{ space[0] }}: {{ space[1].drive_up }}{% unless forloop.last %} | {% endunless %}
-    {% endfor %}
-  </span>
 </div>
 <div class="title_bar">
   <span class="title">Ferry</span>
