@@ -78,9 +78,10 @@ def test_webhook_with_mock_data(mock_get):
     
     client = app.test_client()
     response = client.get('/webhook')
-    
+
     assert response.status_code == 200
-    assert b'WA State Ferry Status' in response.data
+    assert b'FerryTrmnl' in response.data
+    assert b'Test Ferry' in response.data
 
 
 @patch.dict(os.environ, {
@@ -142,6 +143,68 @@ def test_format_ferry_data():
     assert "vessels" in result
     assert len(result["vessels"]) == 1
     assert result["vessels"][0]["name"] == "Test Ferry"
+
+
+@patch.dict(os.environ, {
+    'WSDOT_API_KEY': 'test_key_12345',
+    'FLASK_PORT': '5050'
+})
+def test_format_vestaboard_message():
+    """Test that ferry data lays out onto a valid 6x22 Vestaboard grid."""
+    from app import format_vestaboard_message, VB_ROWS, VB_COLS
+
+    formatted = {
+        "route_name": "Seattle / Bainbridge",
+        "vessels": [
+            {"name": "Wenatchee", "status": "Sailing", "location": "", "eta": ""},
+            {"name": "Tacoma", "status": "Docked", "location": "", "eta": ""},
+        ],
+        "terminal_spaces": {"Seattle": {"drive_up": 45}, "Bainbridge Island": {"drive_up": 120}},
+        "update_time": "3:15 PM",
+    }
+    grid = format_vestaboard_message(formatted)
+
+    # Grid must be exactly 6 rows of 22 codes, each a valid Vestaboard code.
+    assert len(grid) == VB_ROWS
+    for row in grid:
+        assert len(row) == VB_COLS
+        assert all(isinstance(code, int) and 0 <= code <= 71 for code in row)
+
+
+@patch.dict(os.environ, {
+    'WSDOT_API_KEY': 'test_key_12345',
+    'FLASK_PORT': '5050'
+})
+def test_format_vestaboard_message_error():
+    """Test that error data still produces a valid grid."""
+    from app import format_vestaboard_message, VB_ROWS, VB_COLS
+
+    grid = format_vestaboard_message({"error": "API key not configured"})
+    assert len(grid) == VB_ROWS
+    assert all(len(row) == VB_COLS for row in grid)
+
+
+@patch.dict(os.environ, {
+    'WSDOT_API_KEY': 'test_key_12345',
+    'FLASK_PORT': '5050'
+})
+@patch('app.requests.get')
+def test_vestaboard_preview_endpoint(mock_get):
+    """Test the /api/vestaboard preview returns a grid without sending."""
+    from app import app
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = [{'VesselName': 'Test Ferry', 'InService': True}]
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    client = app.test_client()
+    response = client.get('/api/vestaboard?preview=true')
+
+    assert response.status_code == 200
+    data = json.loads(response.data)
+    assert data['sent'] is False
+    assert len(data['characters']) == 6
 
 
 if __name__ == '__main__':

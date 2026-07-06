@@ -9,6 +9,7 @@ A Washington State Ferry status display plugin for [Trmnl](https://usetrmnl.com/
 - **Upcoming Departures**: Lists next departures for your chosen route
 - **E-ink Optimized**: Display formatted for e-ink screens with clear, readable text
 - **REST API**: Provides both HTML webhook and JSON API endpoints
+- **Vestaboard Support**: Optionally push ferry status to a Vestaboard / Vestaboard Note split-flap display
 - **Production Ready**: Designed to run behind nginx with systemd service management
 - **CI/CD Ready**: Includes GitHub Actions workflows for automated testing and deployment
 
@@ -94,6 +95,8 @@ Edit the `.env` file to configure the webhook server:
 | `WSDOT_API_BASE_URL` | WSDOT API base URL | `https://www.wsdot.wa.gov/ferries/api` |
 | `FERRY_ROUTE_ID` | Specific ferry route ID (optional) | `` |
 | `TRMNL_DEVICE_ID` | Your Trmnl device ID (optional) | `` |
+| `VESTABOARD_RW_KEY` | Vestaboard Read/Write key, enables `/api/vestaboard` (optional) | `` |
+| `VESTABOARD_RW_URL` | Vestaboard Read/Write API endpoint (optional) | `https://rw.vestaboard.com/` |
 
 ### Getting a WSDOT API Key
 
@@ -156,6 +159,38 @@ curl http://localhost:5050/api/ferry-status
   "vessels": [...],
   "route_info": {...},
   "timestamp": "2024-01-15T10:30:00"
+}
+```
+
+### `GET|POST /api/vestaboard`
+
+Pushes the current ferry status to a [Vestaboard](https://www.vestaboard.com/)
+(or Vestaboard Note) device, laid out on the 6-row × 22-column split-flap grid.
+
+Requires `VESTABOARD_RW_KEY` to be set (a Read/Write API key from the Vestaboard
+app or [web.vestaboard.com](https://web.vestaboard.com)). Trigger it from a cron
+job, a button, or any scheduler you like.
+
+**Query Parameters**:
+- `route_id` (optional): Specific ferry route to display
+- `preview` (optional): If truthy (`1`/`true`/`yes`), returns the character grid
+  as JSON **without** pushing to the board — handy for testing the layout
+
+**Example**:
+```bash
+# Push live status to the board
+curl -X POST "http://localhost:5050/api/vestaboard?route_id=sea-bi"
+
+# Preview the grid without sending
+curl "http://localhost:5050/api/vestaboard?route_id=sea-bi&preview=true"
+```
+
+**Response**:
+```json
+{
+  "status": "sent",
+  "sent": true,
+  "characters": [[0, 0, ...], ...]
 }
 ```
 
@@ -410,6 +445,39 @@ Or use docker-compose:
 cd deployment
 docker-compose up -d
 ```
+
+### Pre-built Image from GHCR
+
+Every published GitHub Release builds and pushes a container image to the
+GitHub Container Registry via `.github/workflows/publish.yml`:
+
+```
+ghcr.io/cdibona/ferrynotifier:latest      # newest release
+ghcr.io/cdibona/ferrynotifier:0.1.0       # a specific version
+```
+
+While the repository (and therefore the package) is private, authenticate to
+GHCR first with a GitHub token that has the `read:packages` scope:
+
+```bash
+echo "$GHCR_PAT" | docker login ghcr.io -u <github-username> --password-stdin
+```
+
+Then run the published image directly:
+
+```bash
+docker run -p 5050:5050 --env-file .env ghcr.io/cdibona/ferrynotifier:latest
+```
+
+Or with Compose (pulls instead of building):
+
+```bash
+docker compose -f deployment/docker-compose.ghcr.yml pull
+docker compose -f deployment/docker-compose.ghcr.yml up -d
+```
+
+Once the repository is made public, the package can be set to public as well
+and no login is needed to pull it.
 
 ### Systemd Service
 

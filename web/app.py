@@ -38,9 +38,20 @@ FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
 SITE_URL = os.getenv('SITE_URL', '')
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL', '')
 
+# Vestaboard configuration (optional push target)
+# Uses the Read/Write API: https://docs.vestaboard.com/docs/read-write-api/introduction
+# Get a Read/Write key from the Vestaboard app (Settings > API) or web.vestaboard.com.
+# The same key works for a Vestaboard Note device.
+VESTABOARD_RW_KEY = os.getenv('VESTABOARD_RW_KEY', '')
+VESTABOARD_RW_URL = os.getenv('VESTABOARD_RW_URL', 'https://rw.vestaboard.com/')
+
 # Display configuration constants
 MAX_VESSELS_DISPLAY = 5  # Maximum number of vessels to display
 MAX_DEPARTURES_DISPLAY = 10  # Maximum number of departures to display
+
+# Vestaboard display dimensions (split-flap grid)
+VB_ROWS = 6
+VB_COLS = 22
 
 
 def send_discord_notification(endpoint: str, route_id: str, ip_address: str, user_agent: str):
@@ -966,6 +977,142 @@ def format_ferry_data(data: Dict[str, Any]) -> Dict[str, Any]:
     return formatted
 
 
+# --- Vestaboard support ---------------------------------------------------
+
+# Vestaboard character code map (blank, A-Z, digits, and common punctuation).
+# See https://docs.vestaboard.com/docs/characterCodes
+VB_CHAR_MAP: Dict[str, int] = {' ': 0}
+for _i, _c in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ", start=1):
+    VB_CHAR_MAP[_c] = _i
+for _i, _c in enumerate("123456789", start=27):
+    VB_CHAR_MAP[_c] = _i
+VB_CHAR_MAP['0'] = 36
+VB_CHAR_MAP.update({
+    '!': 37, '@': 38, '#': 39, '$': 40, '(': 41, ')': 42, '-': 44, '+': 46,
+    '&': 47, '=': 48, ';': 49, ':': 50, "'": 52, '"': 53, '%': 54, ',': 55,
+    '.': 56, '/': 59, '?': 60, '°': 62,
+})
+
+# Short status tokens so a vessel line fits within 22 columns.
+VB_STATUS_SHORT = {
+    "Sailing": "SAIL",
+    "Docked": "DOCK",
+    "Out of service": "OOS",
+}
+
+
+def _vb_char(ch: str) -> int:
+    """Map a single character to its Vestaboard code (unknown -> blank)."""
+    return VB_CHAR_MAP.get(ch.upper(), 0)
+
+
+def _vb_row(left: str = "", right: str = "", center: Optional[str] = None) -> list:
+    """
+    Build a single 22-cell Vestaboard row.
+
+    If ``center`` is given, that text is centered. Otherwise ``left`` is placed
+    left-aligned and ``right`` right-aligned on the same row, with ``left``
+    truncated first if the two would collide.
+    """
+    if center is not None:
+        codes = [_vb_char(c) for c in str(center)[:VB_COLS]]
+        pad = VB_COLS - len(codes)
+        left_pad = pad // 2
+        return [0] * left_pad + codes + [0] * (pad - left_pad)
+
+    left = str(left)
+    right = str(right)
+    # Reserve at least one blank between left and right tokens.
+    max_left = VB_COLS - len(right) - (1 if right else 0)
+    if len(left) > max_left:
+        left = left[:max(max_left, 0)]
+
+    left_codes = [_vb_char(c) for c in left]
+    right_codes = [_vb_char(c) for c in right]
+    middle = VB_COLS - len(left_codes) - len(right_codes)
+    return left_codes + [0] * middle + right_codes
+
+
+def format_vestaboard_message(data: Dict[str, Any]) -> list:
+    """
+    Lay formatted ferry data out onto a 6-row x 22-column Vestaboard grid.
+
+    Args:
+        data: Output of :func:`format_ferry_data`.
+
+    Returns:
+        A list of 6 rows, each a list of 22 Vestaboard character codes.
+    """
+    rows = []
+
+    if "error" in data:
+        rows.append(_vb_row(center="FERRY ERROR"))
+        # Word-wrap the error message across the remaining rows.
+        words = str(data["error"]).split()
+        line = ""
+        for word in words:
+            candidate = f"{line} {word}".strip()
+            if len(candidate) > VB_COLS:
+                if line:
+                    rows.append(_vb_row(left=line))
+                line = word[:VB_COLS]
+            else:
+                line = candidate
+        if line:
+            rows.append(_vb_row(left=line))
+    else:
+        rows.append(_vb_row(center=data.get("route_name", "FERRIES")))
+
+        vessels = [v for v in data.get("vessels", []) if v.get("name") != "No vessels"]
+        if not vessels:
+            rows.append(_vb_row(center="NO ACTIVE VESSELS"))
+        else:
+            for vessel in vessels[:VB_ROWS - 2]:
+                status = vessel.get("status", "")
+                short = VB_STATUS_SHORT.get(status, status[:4])
+                rows.append(_vb_row(left=vessel.get("name", ""), right=short))
+
+        # Bottom row: terminal parking counts if available, else the time.
+        spaces = data.get("terminal_spaces", {})
+        if spaces:
+            parts = [f"{term[:3]} {info.get('drive_up', 0)}" for term, info in spaces.items()]
+            rows.append(_vb_row(center="  ".join(parts)))
+        else:
+            rows.append(_vb_row(right=data.get("update_time", "")))
+
+    # Pad or truncate to exactly VB_ROWS rows.
+    while len(rows) < VB_ROWS:
+        rows.append([0] * VB_COLS)
+    return rows[:VB_ROWS]
+
+
+def send_to_vestaboard(characters: list) -> Dict[str, Any]:
+    """
+    Push a 6x22 character grid to the configured Vestaboard via the Read/Write API.
+
+    Returns a result dict with either ``status`` or ``error``.
+    """
+    if not VESTABOARD_RW_KEY:
+        return {"error": "Vestaboard Read/Write key not configured"}
+
+    try:
+        response = requests.post(
+            VESTABOARD_RW_URL,
+            headers={
+                "X-Vestaboard-Read-Write-Key": VESTABOARD_RW_KEY,
+                "Content-Type": "application/json",
+            },
+            json={"characters": characters},
+            timeout=10,
+        )
+        response.raise_for_status()
+        body = response.json() if response.content else {}
+        return {"status": "sent", "response": body}
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to send to Vestaboard: {e}")
+        return {"error": f"Failed to send to Vestaboard: {str(e)}"}
+
+
 def get_site_url() -> str:
     """Get the site URL, with fallback to constructing from request."""
     if SITE_URL:
@@ -995,6 +1142,7 @@ def api_info():
             "/": "Webhook simulator frontend",
             "/webhook": "Main webhook endpoint for Trmnl (GET)",
             "/api/ferry-status": "JSON API endpoint (GET)",
+            "/api/vestaboard": "Push ferry status to a Vestaboard device (GET/POST)",
             "/api/info": "API information (GET)",
             "/health": "Health check endpoint"
         },
@@ -1145,6 +1293,45 @@ def api_trmnl_preview():
     # Render with TRMNL-style template
     html = render_template_string(TRMNL_PREVIEW_TEMPLATE, **formatted_data)
     return html
+
+
+@app.route('/api/vestaboard', methods=['GET', 'POST'])
+def api_vestaboard():
+    """
+    Push current ferry status to a Vestaboard (or Vestaboard Note) device.
+
+    Query parameters:
+        route_id: Optional route to display (defaults to FERRY_ROUTE_ID).
+        preview:  If truthy, return the character grid without sending it.
+    """
+    logger.info("Vestaboard endpoint called")
+
+    route_id = request.args.get('route_id', FERRY_ROUTE_ID)
+    preview = request.args.get('preview', '').lower() in ('1', 'true', 'yes')
+
+    # Send Discord notification if configured
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+    user_agent = request.headers.get('User-Agent', '')
+    send_discord_notification('/api/vestaboard', route_id, ip_address, user_agent)
+
+    # Fetch, format, and lay out for the split-flap grid
+    ferry_data = fetch_ferry_status(route_id)
+    formatted_data = format_ferry_data(ferry_data)
+    characters = format_vestaboard_message(formatted_data)
+
+    if preview:
+        return jsonify({"characters": characters, "sent": False})
+
+    if not VESTABOARD_RW_KEY:
+        return jsonify({
+            "error": "Vestaboard Read/Write key not configured",
+            "characters": characters,
+            "sent": False,
+        }), 503
+
+    result = send_to_vestaboard(characters)
+    status_code = 200 if "error" not in result else 502
+    return jsonify({**result, "characters": characters, "sent": "error" not in result}), status_code
 
 
 def main():
