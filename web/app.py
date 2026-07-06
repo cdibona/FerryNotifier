@@ -12,7 +12,8 @@ import time
 import fcntl
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Dict, Any, Optional
 
 import requests
@@ -61,6 +62,21 @@ SETTINGS_PATH = os.getenv(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'settings.json')
 )
 _settings_lock = threading.Lock()
+
+# WA State Ferries run on Pacific time; render times in that zone regardless of
+# where the server/container runs (which is often UTC).
+try:
+    FERRY_TZ: Optional[ZoneInfo] = ZoneInfo(os.getenv('FERRY_TIMEZONE', 'America/Los_Angeles'))
+except Exception:  # pragma: no cover - missing tz database
+    FERRY_TZ = None
+
+
+def _now() -> datetime:
+    """Current wall-clock time in the ferry timezone, as a naive datetime."""
+    if FERRY_TZ is not None:
+        return datetime.now(FERRY_TZ).replace(tzinfo=None)
+    return datetime.now()
+
 
 # Poll WSDOT at most once per this many seconds per route (shared cache).
 WSDOT_CACHE_SECONDS = int(os.getenv('WSDOT_CACHE_SECONDS', '300'))
@@ -1182,7 +1198,7 @@ def compute_direction_status(data: Dict[str, Any], route: Optional[str],
     chosen = next((o for o in opts if o["value"] == direction), opts[0])
     from_t, to_t = chosen["from"], chosen["to"]
 
-    now = datetime.now()
+    now = _now()
     departures = data.get("terminal_departures", {}).get(from_t, [])
     # Next future departure toward the arrival terminal (or any, if to_t is None).
     upcoming = [
@@ -1254,14 +1270,19 @@ def route_alert(route: Optional[str], alerts: list, delays_only: bool = False) -
 
 
 def parse_wsdot_date(date_str: Optional[str]) -> Optional[datetime]:
-    """Parse WSDOT API date format like /Date(1765655700000-0800)/"""
+    """
+    Parse WSDOT API date format like /Date(1765655700000-0800)/ into a naive
+    datetime in the ferry timezone (Pacific), independent of the host timezone.
+    """
     if not date_str or date_str == "None":
         return None
     try:
-        # Extract timestamp from /Date(1234567890000-0800)/
+        # The number is a UTC epoch in milliseconds; the offset is informational.
         match = re.search(r'/Date\((\d+)([+-]\d{4})?\)/', str(date_str))
         if match:
             timestamp_ms = int(match.group(1))
+            if FERRY_TZ is not None:
+                return datetime.fromtimestamp(timestamp_ms / 1000, tz=FERRY_TZ).replace(tzinfo=None)
             return datetime.fromtimestamp(timestamp_ms / 1000)
     except Exception:
         pass
@@ -1422,7 +1443,7 @@ def format_ferry_data(data: Dict[str, Any]) -> Dict[str, Any]:
         "vessels": [],
         "departures": [],
         "terminal_spaces": data.get("terminal_spaces", {}),
-        "update_time": datetime.now().strftime("%I:%M %p").lstrip("0")
+        "update_time": _now().strftime("%I:%M %p").lstrip("0")
     }
 
     # Process vessel data
@@ -2328,10 +2349,10 @@ def _save_state(state: Dict[str, Any]) -> None:
 
 
 def _record_push(kind: str, target_id: str, result: Dict[str, Any]) -> None:
-    """Record the outcome of a push for the admin status view."""
+    """Record the outcome of a push for the admin status view (UTC timestamp)."""
     state = _load_state()
     state.setdefault(kind, {})[target_id] = {
-        "last_push": datetime.now().isoformat(),
+        "last_push": datetime.now(timezone.utc).isoformat(),
         "ok": "error" not in result,
         "message": result.get("error") or result.get("status") or "sent",
     }
@@ -2340,9 +2361,13 @@ def _record_push(kind: str, target_id: str, result: Dict[str, Any]) -> None:
 
 def _parse_iso(value: Optional[str]) -> Optional[datetime]:
     try:
-        return datetime.fromisoformat(value) if value else None
+        dt = datetime.fromisoformat(value) if value else None
     except (ValueError, TypeError):
         return None
+    # Treat legacy naive timestamps as UTC so comparisons stay consistent.
+    if dt is not None and dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _interval_due(entry: Dict[str, Any], interval_min: int, floor: int, now: datetime) -> bool:
@@ -2408,7 +2433,7 @@ def _scheduler_tick() -> None:
     settings = load_settings()
     wsdot = settings.get("wsdot_key") or None
     state = _load_state()
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     dirty = False
 
     def _finish_push(entry, result):

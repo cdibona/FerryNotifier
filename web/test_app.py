@@ -383,22 +383,23 @@ def test_scheduler_pushes_due_targets(tmp_path):
 @patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
 def test_aligned_schedule_minute_13_of_15():
     import app
-    from datetime import datetime
+    from datetime import datetime, timezone
+    utc = timezone.utc
     sch = app._normalize_schedule({'enabled': True, 'mode': 'aligned', 'align_period_min': 15, 'align_offset_min': 13})
-    assert app._aligned_due(sch, {}, datetime(2026, 7, 6, 10, 13, 0)) is True
-    assert app._aligned_due(sch, {}, datetime(2026, 7, 6, 10, 14, 0)) is False
+    assert app._aligned_due(sch, {}, datetime(2026, 7, 6, 10, 13, 0, tzinfo=utc)) is True
+    assert app._aligned_due(sch, {}, datetime(2026, 7, 6, 10, 14, 0, tzinfo=utc)) is False
     # once per window
-    just = {'last_push': datetime(2026, 7, 6, 10, 13, 0).isoformat()}
-    assert app._aligned_due(sch, just, datetime(2026, 7, 6, 10, 13, 30)) is False
-    assert app._aligned_due(sch, just, datetime(2026, 7, 6, 10, 28, 0)) is True
+    just = {'last_push': datetime(2026, 7, 6, 10, 13, 0, tzinfo=utc).isoformat()}
+    assert app._aligned_due(sch, just, datetime(2026, 7, 6, 10, 13, 30, tzinfo=utc)) is False
+    assert app._aligned_due(sch, just, datetime(2026, 7, 6, 10, 28, 0, tzinfo=utc)) is True
 
 
 @patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
 def test_smart_schedule_triggers():
     import app
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     sch = app._normalize_schedule({'enabled': True, 'mode': 'smart', 'interval_min': 15, 'spaces_pct': 25})
-    now = datetime(2026, 7, 6, 10, 0, 0)
+    now = datetime(2026, 7, 6, 10, 0, 0, tzinfo=timezone.utc)
     data = {'vessels': [{'VesselName': 'Tacoma', 'AtDock': True, 'InService': True}],
             'terminal_spaces': {'Seattle': {'max': 200, 'drive_up': 100}}}
     status = {'from': 'Seattle', 'spaces': 100}
