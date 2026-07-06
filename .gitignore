@@ -208,3 +208,7 @@ __marimo__/
 
 # Editor swap files
 *.swp
+
+# Persisted web UI settings (contains API keys)
+web/data/
+settings.json

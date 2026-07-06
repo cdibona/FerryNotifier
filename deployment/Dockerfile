@@ -35,9 +35,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY web/app.py .
 
-# Create a non-root user
+# Create a non-root user and a writable data dir for persisted settings
 RUN useradd -m -u 1000 ferrytrmnl && \
+    mkdir -p /app/data && \
     chown -R ferrytrmnl:ferrytrmnl /app
+
+# Persisted settings live here (mount a volume to keep them across restarts)
+ENV SETTINGS_PATH=/app/data/settings.json
+VOLUME ["/app/data"]
 
 USER ferrytrmnl
 

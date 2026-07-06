@@ -234,6 +234,81 @@ def test_wsdot_key_override(mock_get):
     assert 'env_key' not in used_keys
 
 
+@patch.dict(os.environ, {
+    'WSDOT_API_KEY': 'test_key_12345',
+    'FLASK_PORT': '5050'
+})
+def test_settings_persistence_and_board(tmp_path):
+    """Settings persist to disk and board ids are generated + resolved for pushes."""
+    import app
+    spath = str(tmp_path / 'settings.json')
+    with patch.object(app, 'SETTINGS_PATH', spath):
+        client = app.app.test_client()
+
+        # Empty defaults on first read
+        assert client.get('/api/settings').get_json()['vestaboard']['boards'] == []
+
+        # Save a board (no id -> slugified from name)
+        r = client.post('/api/settings', json={
+            'route_id': 'sea-bi',
+            'vestaboard': {'selected': '', 'boards': [{'name': 'Kitchen Board', 'key': 'kkey', 'url': ''}]}
+        })
+        saved = r.get_json()
+        assert saved['vestaboard']['boards'][0]['id'] == 'kitchen-board'
+
+        # Persisted across a fresh read
+        again = client.get('/api/settings').get_json()
+        assert again['route_id'] == 'sea-bi'
+        assert again['vestaboard']['boards'][0]['key'] == 'kkey'
+
+        # Push resolves the board_id to that board's key
+        with patch('app.requests.get') as mg, patch('app.requests.post') as mp:
+            gr = MagicMock(); gr.json.return_value = []; gr.raise_for_status = MagicMock(); mg.return_value = gr
+            pr = MagicMock(); pr.content = b'{}'; pr.json.return_value = {}; pr.raise_for_status = MagicMock(); mp.return_value = pr
+            resp = client.post('/api/vestaboard', json={'route_id': 'sea-bi', 'board_id': 'kitchen-board'})
+            assert resp.status_code == 200 and resp.get_json()['sent'] is True
+            assert mp.call_args.kwargs['headers']['X-Vestaboard-Read-Write-Key'] == 'kkey'
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_direction_status_and_layout():
+    """Direction status computes next departure/spaces/delay and lays out correctly."""
+    from app import compute_direction_status, format_vestaboard_message, format_ferry_data, VB_ROWS, VB_COLS
+    from datetime import datetime, timedelta
+
+    soon = datetime.now() + timedelta(minutes=30)
+    raw = {
+        "route_name": "Seattle / Bainbridge Island",
+        "route_id": "sea-bi",
+        "vessels": [],
+        "terminal_spaces": {"Bainbridge Island": {"drive_up": 100}},
+        "terminal_departures": {
+            "Bainbridge Island": [
+                {"time": soon, "arrival": "Seattle", "vessel": "Wenatchee", "drive_up": 106},
+            ]
+        },
+        "alerts": [
+            {"title": "Sea/BI - vessel out of service - expect delays", "route_ids": [5],
+             "all_routes": False, "is_delay": True},
+            {"title": "Sea/BI - elevator out of service", "route_ids": [5],
+             "all_routes": False, "is_delay": False},
+        ],
+    }
+    st = compute_direction_status(raw, "sea-bi", "Bainbridge Island")
+    assert st["from_short"] == "BAIN" and st["to_short"] == "SEA"
+    assert st["spaces"] == 106
+    assert st["delay"] and "vessel out of service" in st["delay"].lower()
+
+    grid = format_vestaboard_message(format_ferry_data(raw), st)
+    assert len(grid) == VB_ROWS and all(len(r) == VB_COLS for r in grid)
+
+    # No-delay route: informational alert must not be treated as a delay
+    raw_info = dict(raw, alerts=[{"title": "Youth tickets valid six hours", "route_ids": [5],
+                                  "all_routes": False, "is_delay": False}])
+    st2 = compute_direction_status(raw_info, "sea-bi", "Bainbridge Island")
+    assert st2["delay"] is None
+
+
 if __name__ == '__main__':
     print("Running basic tests...")
     
