@@ -36,11 +36,12 @@ def test_app_routes():
     # Test root endpoint (simulator frontend) has both integration tabs
     response = client.get('/')
     assert response.status_code == 200
-    assert b'Ferry Status Simulator' in response.data
+    assert b'FerryNotifier Control Panel' in response.data
     assert b'data-tab="trmnl"' in response.data
     assert b'data-tab="vestaboard"' in response.data
     assert b'Fetch Preview' in response.data
     assert b'Push to Board' in response.data
+    assert b'Scheduled Push Targets' in response.data
 
     # Test API info endpoint
     response = client.get('/api/info')
@@ -307,6 +308,65 @@ def test_direction_status_and_layout():
                                   "all_routes": False, "is_delay": False}])
     st2 = compute_direction_status(raw_info, "sea-bi", "Bainbridge Island")
     assert st2["delay"] is None
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_note_model_dimensions():
+    """A Note board renders a 3x15 grid; flagship renders 6x22."""
+    from app import format_vestaboard_message, format_ferry_data, compute_direction_status
+    from datetime import datetime, timedelta
+
+    soon = datetime.now() + timedelta(minutes=30)
+    raw = {
+        "route_name": "Seattle / Bainbridge Island", "route_id": "sea-bi", "vessels": [],
+        "terminal_spaces": {"Bainbridge Island": {"drive_up": 106}},
+        "terminal_departures": {"Bainbridge Island": [
+            {"time": soon, "arrival": "Seattle", "vessel": "Wenatchee", "drive_up": 106}]},
+        "alerts": [],
+    }
+    st = compute_direction_status(raw, "sea-bi", "Bainbridge Island")
+    fd = format_ferry_data(raw)
+
+    flag = format_vestaboard_message(fd, st, model="flagship")
+    note = format_vestaboard_message(fd, st, model="note")
+    assert len(flag) == 6 and all(len(r) == 22 for r in flag)
+    assert len(note) == 3 and all(len(r) == 15 for r in note)
+    # All codes valid for both
+    for grid in (flag, note):
+        assert all(0 <= c <= 71 for row in grid for c in row)
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_scheduler_pushes_due_targets(tmp_path):
+    """The scheduler pushes enabled targets, records state, and respects intervals."""
+    import app
+    with patch.object(app, 'SETTINGS_PATH', str(tmp_path / 'settings.json')), \
+         patch.object(app, 'SCHEDULE_STATE_PATH', str(tmp_path / 'state.json')):
+        client = app.app.test_client()
+        client.post('/api/settings', json={
+            'wsdot_key': 'wk',
+            'vestaboard': {'boards': [{'name': 'K', 'model': 'note', 'route': 'sea-bi',
+                                       'direction': 'Seattle', 'key': 'vbkey',
+                                       'schedule': {'enabled': True, 'interval_min': 30}}]},
+            'trmnl': {'devices': [{'name': 'O', 'route': 'sea-bi', 'direction': 'Seattle',
+                                   'webhook_url': 'https://usetrmnl.com/api/custom_plugins/x',
+                                   'schedule': {'enabled': True, 'interval_min': 15}}]},
+        })
+        with patch('app.requests.get') as mg, patch('app.requests.post') as mp:
+            gr = MagicMock(); gr.json.return_value = []; gr.raise_for_status = MagicMock(); mg.return_value = gr
+            pr = MagicMock(); pr.status_code = 200; pr.content = b'{}'; pr.json.return_value = {}; pr.raise_for_status = MagicMock(); mp.return_value = pr
+            app._scheduler_tick()
+            posts = [c.args[0] for c in mp.call_args_list]
+            assert 'https://rw.vestaboard.com/' in posts
+            assert 'https://usetrmnl.com/api/custom_plugins/x' in posts
+            # A second immediate tick pushes nothing (intervals not elapsed)
+            mp.reset_mock()
+            app._scheduler_tick()
+            assert mp.call_count == 0
+
+        status = client.get('/api/schedule/status').get_json()
+        assert status['vestaboard']['k']['ok'] is True
+        assert status['trmnl']['o']['ok'] is True
 
 
 if __name__ == '__main__':

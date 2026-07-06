@@ -41,7 +41,9 @@ RUN useradd -m -u 1000 ferrytrmnl && \
     chown -R ferrytrmnl:ferrytrmnl /app
 
 # Persisted settings live here (mount a volume to keep them across restarts)
-ENV SETTINGS_PATH=/app/data/settings.json
+ENV SETTINGS_PATH=/app/data/settings.json \
+    ENABLE_SCHEDULER=true
+
 VOLUME ["/app/data"]
 
 USER ferrytrmnl
@@ -53,5 +55,6 @@ EXPOSE 5050
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:5050/health || exit 1
 
-# Run with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "4", "--access-logfile", "-", "--error-logfile", "-", "app:app"]
+# Single worker + threads: the built-in push scheduler runs in-process, so we
+# keep one worker (guarded by a file lock) to avoid duplicate scheduled pushes.
+CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "1", "--threads", "8", "--access-logfile", "-", "--error-logfile", "-", "app:app"]

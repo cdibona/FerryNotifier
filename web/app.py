@@ -8,9 +8,11 @@ from the WSDOT Ferries API and formats it for display on Trmnl e-ink devices.
 import os
 import re
 import json
+import time
+import fcntl
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 import requests
@@ -64,9 +66,16 @@ _settings_lock = threading.Lock()
 MAX_VESSELS_DISPLAY = 5  # Maximum number of vessels to display
 MAX_DEPARTURES_DISPLAY = 10  # Maximum number of departures to display
 
-# Vestaboard display dimensions (split-flap grid)
+# Vestaboard display dimensions (split-flap grid) by model.
 VB_ROWS = 6
 VB_COLS = 22
+NOTE_ROWS = 3
+NOTE_COLS = 15
+
+
+def vb_dimensions(model: str):
+    """Return (rows, cols) for a Vestaboard model ('note' -> 3x15, else 6x22)."""
+    return (NOTE_ROWS, NOTE_COLS) if str(model).lower() == 'note' else (VB_ROWS, VB_COLS)
 
 
 def send_discord_notification(endpoint: str, route_id: str, ip_address: str, user_agent: str):
@@ -294,6 +303,14 @@ SIMULATOR_TEMPLATE = """
         .btn-ghost:hover { text-decoration: underline; }
         .board-editor { margin-top: 16px; padding: 16px; background: #f8f9fb; border: 1px solid #e6e8f0; border-radius: 10px; }
         .board-editor h4 { margin: 0 0 12px 0; font-size: 14px; color: #555; }
+        .sched-row { align-items: center; gap: 12px; }
+        .sched-toggle { font-size: 14px; color: #444; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+        .sched-int { font-size: 14px; color: #666; }
+        .sched-int input { padding: 6px 8px; border: 2px solid #e0e0e0; border-radius: 6px; }
+        .target-status { font-size: 12px; color: #888; margin-left: auto; }
+        .target-status.ok { color: #2e7d32; }
+        .target-status.bad { color: #c0392b; }
+        .sched-banner { margin-top: 8px; font-size: 13px; opacity: 0.95; }
         .webhook-url { background: #f8f9fa; border-radius: 8px; padding: 12px; margin-top: 15px; font-family: 'Monaco', 'Menlo', monospace; font-size: 13px; color: #666; word-break: break-all; }
         .webhook-url strong { color: #333; }
 
@@ -347,8 +364,9 @@ SIMULATOR_TEMPLATE = """
 <body>
     <div class="simulator-container">
         <div class="header">
-            <h1>Ferry Status Simulator</h1>
-            <p>Preview and push WA State Ferry status to TRMNL and Vestaboard</p>
+            <h1>FerryNotifier Control Panel</h1>
+            <p>Preview, schedule, and push WA State Ferry status to your TRMNL &amp; Vestaboard devices</p>
+            <p id="schedBanner" class="sched-banner"></p>
         </div>
 
         <div class="tabs">
@@ -428,6 +446,55 @@ SIMULATOR_TEMPLATE = """
                 <div class="status-indicator"><div class="status-dot" id="trmnlDot"></div><span id="trmnlStatus">Ready</span></div>
                 <div class="response-time" id="trmnlTime"></div>
             </div>
+
+            <div class="controls" style="margin-top: 20px;">
+                <h2>Scheduled Push Targets (Webhook)</h2>
+                <p class="hint">TRMNL normally polls the URL above. To have the server <em>push</em> on a schedule,
+                    create a <strong>Webhook</strong> Private Plugin in your
+                    <a href="https://usetrmnl.com/" target="_blank" rel="noopener">TRMNL dashboard &#8599;</a>,
+                    paste its webhook URL here, and enable a schedule (min 5&nbsp;min per TRMNL's rate limit).</p>
+                <div class="form-row">
+                    <div class="form-group wide">
+                        <label>Target Device</label>
+                        <select id="trDeviceSelect" onchange="onDeviceSelect()"></select>
+                    </div>
+                </div>
+                <div class="board-editor" id="deviceEditor" style="display: none;">
+                    <h4 id="deviceEditorTitle">Device</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" id="deName" placeholder="e.g. Office TRMNL">
+                        </div>
+                        <div class="form-group">
+                            <label>Webhook URL</label>
+                            <input type="text" id="deWebhook" placeholder="https://usetrmnl.com/api/custom_plugins/…" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="form-row" style="margin-top: 15px;">
+                        <div class="form-group">
+                            <label>Route</label>
+                            <select id="deRoute" onchange="refreshDeviceDir()">
+                                {% for r in routes %}<option value="{{ r[0] }}">{{ r[1] }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Direction</label>
+                            <select id="deDir"></select>
+                        </div>
+                    </div>
+                    <div class="form-row sched-row" style="margin-top: 15px;">
+                        <label class="sched-toggle"><input type="checkbox" id="deSchedEnabled"> Auto-push on a schedule</label>
+                        <span class="sched-int">every <input type="number" id="deSchedInterval" min="5" max="1440" value="15" style="width:70px"> min</span>
+                        <span class="target-status" id="deStatus"></span>
+                    </div>
+                    <div class="form-row" style="margin-top: 15px;">
+                        <button class="btn btn-secondary" onclick="saveDevice()">Save Device</button>
+                        <button class="btn btn-primary" id="dePushNowBtn" onclick="pushDeviceNow()">Push now</button>
+                        <button class="btn btn-ghost" id="deDeleteBtn" onclick="deleteDevice()">Delete</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- ===================== VESTABOARD TAB ===================== -->
@@ -461,7 +528,7 @@ SIMULATOR_TEMPLATE = """
                         </div>
                         <div class="form-group">
                             <label>Model</label>
-                            <select id="beModel">
+                            <select id="beModel" onchange="setVbLabel(this.value)">
                                 <option value="flagship">Vestaboard (Flagship)</option>
                                 <option value="note">Vestaboard Note</option>
                             </select>
@@ -491,8 +558,14 @@ SIMULATOR_TEMPLATE = """
                             <input type="text" id="beUrl" placeholder="https://rw.vestaboard.com/" autocomplete="off">
                         </div>
                     </div>
+                    <div class="form-row sched-row" style="margin-top: 15px;">
+                        <label class="sched-toggle"><input type="checkbox" id="beSchedEnabled"> Auto-push on a schedule</label>
+                        <span class="sched-int">every <input type="number" id="beSchedInterval" min="1" max="1440" value="30" style="width:70px"> min</span>
+                        <span class="target-status" id="beStatus"></span>
+                    </div>
                     <div class="form-row" style="margin-top: 15px;">
                         <button class="btn btn-secondary" onclick="saveBoard()">Save Board</button>
+                        <button class="btn btn-primary" id="bePushNowBtn" onclick="pushBoardNow()">Push now</button>
                         <button class="btn btn-ghost" id="beDeleteBtn" onclick="deleteBoard()">Delete</button>
                     </div>
                 </div>
@@ -507,7 +580,7 @@ SIMULATOR_TEMPLATE = """
                 <div class="vb-board-scroll">
                     <div id="vbBoard"><div class="vb-placeholder">Click "Preview Grid" to render the split-flap layout</div></div>
                 </div>
-                <div class="device-label">Vestaboard 6 &times; 22 Split-Flap</div>
+                <div class="device-label" id="vbDeviceLabel">Vestaboard 6 &times; 22 Split-Flap</div>
             </div>
 
             <div class="status-bar">
@@ -543,7 +616,7 @@ SIMULATOR_TEMPLATE = """
         const VB_ENV_SET = {{ vestaboard_env_set|tojson }};
         const ROUTE_DIRECTIONS = {{ route_directions|tojson }};
 
-        const SETTINGS_DEFAULT = { site_url: '', route_id: '', direction: '', wsdot_key: '', vestaboard: { selected: '', boards: [] } };
+        const SETTINGS_DEFAULT = { site_url: '', route_id: '', direction: '', wsdot_key: '', vestaboard: { selected: '', boards: [] }, trmnl: { selected: '', devices: [] } };
         let SETTINGS = JSON.parse(JSON.stringify(SETTINGS_DEFAULT));
         let editingNew = false;
         let saveTimer = null;
@@ -558,6 +631,8 @@ SIMULATOR_TEMPLATE = """
             s = Object.assign({}, SETTINGS_DEFAULT, s || {});
             if (!s.vestaboard) s.vestaboard = { selected: '', boards: [] };
             if (!Array.isArray(s.vestaboard.boards)) s.vestaboard.boards = [];
+            if (!s.trmnl) s.trmnl = { selected: '', devices: [] };
+            if (!Array.isArray(s.trmnl.devices)) s.trmnl.devices = [];
             return s;
         }
 
@@ -585,7 +660,9 @@ SIMULATOR_TEMPLATE = """
             applySettingsToFields();
             SETTINGS.direction = populateDirSelect(document.getElementById('trmnlDir'), SETTINGS.route_id, SETTINGS.direction);
             renderBoardOptions();
+            renderDeviceOptions();
             updateTrmnlUrl();
+            loadScheduleStatus();
         }
         function applySettingsToFields() {
             document.querySelectorAll('[data-sync]').forEach(function (el) { el.value = SETTINGS[el.dataset.sync] || ''; });
@@ -675,8 +752,12 @@ SIMULATOR_TEMPLATE = """
             populateDirSelect(document.getElementById('beDir'), b.route || '', b.direction || '');
             document.getElementById('beKey').value = b.key || '';
             document.getElementById('beUrl').value = b.url || '';
+            document.getElementById('beSchedEnabled').checked = !!(b.schedule && b.schedule.enabled);
+            document.getElementById('beSchedInterval').value = (b.schedule && b.schedule.interval_min) || 30;
             document.getElementById('beDeleteBtn').style.display = '';
             document.getElementById('boardEditor').style.display = '';
+            setVbLabel(b.model || 'flagship');
+            renderTargetStatus('beStatus', 'vestaboard', b.id);
         }
         function showEditorBlank() {
             editingNew = true;
@@ -687,8 +768,12 @@ SIMULATOR_TEMPLATE = """
             populateDirSelect(document.getElementById('beDir'), '', '');
             document.getElementById('beKey').value = '';
             document.getElementById('beUrl').value = '';
+            document.getElementById('beSchedEnabled').checked = false;
+            document.getElementById('beSchedInterval').value = 30;
+            document.getElementById('beStatus').textContent = '';
             document.getElementById('beDeleteBtn').style.display = 'none';
             document.getElementById('boardEditor').style.display = '';
+            setVbLabel('flagship');
         }
         function hideEditor() { document.getElementById('boardEditor').style.display = 'none'; }
         function currentBoardConfig() {
@@ -707,9 +792,15 @@ SIMULATOR_TEMPLATE = """
             if (b) showEditor(b); else hideEditor();
             saveSettingsNow();
         }
+        function scheduleFrom(enabledId, intervalId, floor) {
+            return { enabled: document.getElementById(enabledId).checked,
+                     interval_min: Math.max(floor || 1, parseInt(val(intervalId), 10) || 30) };
+        }
         async function saveBoard() {
             const name = val('beName') || 'Board';
-            const fields = { name: name, model: val('beModel') || 'flagship', route: val('beRoute'), direction: val('beDir'), key: val('beKey'), url: val('beUrl') };
+            const fields = { name: name, model: val('beModel') || 'flagship', route: val('beRoute'),
+                direction: val('beDir'), key: val('beKey'), url: val('beUrl'),
+                schedule: scheduleFrom('beSchedEnabled', 'beSchedInterval', 1) };
             if (editingNew) {
                 const id = slug(name) + '-' + Date.now().toString(36).slice(-4);
                 SETTINGS.vestaboard.boards.push(Object.assign({ id: id }, fields));
@@ -729,6 +820,137 @@ SIMULATOR_TEMPLATE = """
             await saveSettingsNow();
             renderBoardOptions();
             setStatus('vbDot', 'vbStatus', 'vbTime', '', 'Board deleted');
+        }
+        async function pushBoardNow() {
+            const id = SETTINGS.vestaboard.selected;
+            const b = boardById(id);
+            if (!b) { setStatus('vbDot', 'vbStatus', 'vbTime', 'error', 'Save the board first'); return; }
+            if (!confirm('Push live ferry status to ' + b.name + ' now?')) return;
+            const btn = document.getElementById('bePushNowBtn'); btn.disabled = true;
+            setStatus('vbDot', 'vbStatus', 'vbTime', 'loading', 'Pushing…');
+            try {
+                const r = await fetch(siteBase() + '/api/push/vestaboard/' + encodeURIComponent(id), { method: 'POST' });
+                const d = await r.json();
+                setStatus('vbDot', 'vbStatus', 'vbTime', d.error ? 'error' : 'success', d.error || 'Pushed to ' + b.name);
+            } catch (e) { setStatus('vbDot', 'vbStatus', 'vbTime', 'error', 'Error: ' + e.message); }
+            finally { btn.disabled = false; loadScheduleStatus(); }
+        }
+
+        // ---- TRMNL device (webhook push) management ----
+        function deviceById(id) { return SETTINGS.trmnl.devices.filter(function (d) { return d.id === id; })[0] || null; }
+        function renderDeviceOptions() {
+            const sel = document.getElementById('trDeviceSelect');
+            const cur = SETTINGS.trmnl.selected || '';
+            const opts = [];
+            SETTINGS.trmnl.devices.forEach(function (d) { opts.push({ v: d.id, label: d.name }); });
+            opts.push({ v: '__add__', label: '＋ Add TRMNL device…' });
+            sel.innerHTML = '';
+            opts.forEach(function (o) { const e = document.createElement('option'); e.value = o.v; e.textContent = o.label; if (o.v === cur) e.selected = true; sel.appendChild(e); });
+            const d = deviceById(cur);
+            if (d) showDeviceEditor(d); else if (!SETTINGS.trmnl.devices.length) showDeviceEditorBlank(); else hideDeviceEditor();
+        }
+        function refreshDeviceDir() { populateDirSelect(document.getElementById('deDir'), val('deRoute'), ''); }
+        let editingNewDevice = false;
+        function showDeviceEditor(d) {
+            editingNewDevice = false;
+            document.getElementById('deviceEditorTitle').textContent = 'Edit device';
+            document.getElementById('deName').value = d.name || '';
+            document.getElementById('deWebhook').value = d.webhook_url || '';
+            document.getElementById('deRoute').value = d.route || '';
+            populateDirSelect(document.getElementById('deDir'), d.route || '', d.direction || '');
+            document.getElementById('deSchedEnabled').checked = !!(d.schedule && d.schedule.enabled);
+            document.getElementById('deSchedInterval').value = (d.schedule && d.schedule.interval_min) || 15;
+            document.getElementById('deDeleteBtn').style.display = '';
+            document.getElementById('deviceEditor').style.display = '';
+            renderTargetStatus('deStatus', 'trmnl', d.id);
+        }
+        function showDeviceEditorBlank() {
+            editingNewDevice = true;
+            document.getElementById('deviceEditorTitle').textContent = 'Add device';
+            document.getElementById('deName').value = '';
+            document.getElementById('deWebhook').value = '';
+            document.getElementById('deRoute').value = '';
+            populateDirSelect(document.getElementById('deDir'), '', '');
+            document.getElementById('deSchedEnabled').checked = false;
+            document.getElementById('deSchedInterval').value = 15;
+            document.getElementById('deStatus').textContent = '';
+            document.getElementById('deDeleteBtn').style.display = 'none';
+            document.getElementById('deviceEditor').style.display = '';
+        }
+        function hideDeviceEditor() { document.getElementById('deviceEditor').style.display = 'none'; }
+        function onDeviceSelect() {
+            const v = document.getElementById('trDeviceSelect').value;
+            if (v === '__add__') { showDeviceEditorBlank(); return; }
+            SETTINGS.trmnl.selected = v;
+            const d = deviceById(v);
+            if (d) showDeviceEditor(d); else hideDeviceEditor();
+            saveSettingsNow();
+        }
+        async function saveDevice() {
+            const name = val('deName') || 'TRMNL';
+            const fields = { name: name, webhook_url: val('deWebhook'), route: val('deRoute'),
+                direction: val('deDir'), schedule: scheduleFrom('deSchedEnabled', 'deSchedInterval', 5) };
+            if (editingNewDevice) {
+                const id = slug(name) + '-' + Date.now().toString(36).slice(-4);
+                SETTINGS.trmnl.devices.push(Object.assign({ id: id }, fields));
+                SETTINGS.trmnl.selected = id;
+            } else {
+                const d = deviceById(SETTINGS.trmnl.selected);
+                if (d) Object.assign(d, fields);
+            }
+            await saveSettingsNow();
+            renderDeviceOptions();
+        }
+        async function deleteDevice() {
+            const id = SETTINGS.trmnl.selected;
+            SETTINGS.trmnl.devices = SETTINGS.trmnl.devices.filter(function (d) { return d.id !== id; });
+            SETTINGS.trmnl.selected = SETTINGS.trmnl.devices[0] ? SETTINGS.trmnl.devices[0].id : '';
+            await saveSettingsNow();
+            renderDeviceOptions();
+        }
+        async function pushDeviceNow() {
+            const id = SETTINGS.trmnl.selected;
+            const d = deviceById(id);
+            if (!d) { setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', 'error', 'Save the device first'); return; }
+            const btn = document.getElementById('dePushNowBtn'); btn.disabled = true;
+            setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', 'loading', 'Pushing…');
+            try {
+                const r = await fetch(siteBase() + '/api/push/trmnl/' + encodeURIComponent(id), { method: 'POST' });
+                const j = await r.json();
+                setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', j.error ? 'error' : 'success', j.error || 'Pushed to ' + d.name);
+            } catch (e) { setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', 'error', 'Error: ' + e.message); }
+            finally { btn.disabled = false; loadScheduleStatus(); }
+        }
+
+        // ---- schedule status ----
+        let SCHED_STATUS = { vestaboard: {}, trmnl: {} };
+        function agoText(iso) {
+            if (!iso) return 'never';
+            const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+            if (secs < 90) return Math.round(secs) + 's ago';
+            if (secs < 5400) return Math.round(secs / 60) + 'm ago';
+            return Math.round(secs / 3600) + 'h ago';
+        }
+        function renderTargetStatus(elId, kind, id) {
+            const el = document.getElementById(elId); if (!el) return;
+            const s = (SCHED_STATUS[kind] || {})[id];
+            if (!s) { el.className = 'target-status'; el.textContent = 'No pushes yet'; return; }
+            el.className = 'target-status ' + (s.ok ? 'ok' : 'bad');
+            el.textContent = (s.ok ? 'Last push ' : 'Last push failed ') + agoText(s.last_push) + (s.ok ? '' : ' — ' + s.message);
+        }
+        async function loadScheduleStatus() {
+            try {
+                const r = await fetch(siteBase() + '/api/schedule/status');
+                if (!r.ok) return;
+                const d = await r.json();
+                SCHED_STATUS = { vestaboard: d.vestaboard || {}, trmnl: d.trmnl || {} };
+                const nBoards = SETTINGS.vestaboard.boards.length, nDev = SETTINGS.trmnl.devices.length;
+                const banner = document.getElementById('schedBanner');
+                banner.textContent = (d.scheduler_running ? '● Scheduler running' : '○ Scheduler off') +
+                    ' · ' + nBoards + ' board' + (nBoards === 1 ? '' : 's') + ', ' + nDev + ' TRMNL target' + (nDev === 1 ? '' : 's');
+                const b = boardById(SETTINGS.vestaboard.selected); if (b) renderTargetStatus('beStatus', 'vestaboard', b.id);
+                const dev = deviceById(SETTINGS.trmnl.selected); if (dev) renderTargetStatus('deStatus', 'trmnl', dev.id);
+            } catch (e) { /* ignore */ }
         }
 
         // ---- TRMNL preview ----
@@ -758,9 +980,18 @@ SIMULATOR_TEMPLATE = """
         }
 
         // ---- Vestaboard preview/push ----
-        function renderVestaGrid(chars) {
+        function setVbLabel(model) {
+            const rows = (model === 'note') ? 3 : 6, cols = (model === 'note') ? 15 : 22;
+            document.getElementById('vbDeviceLabel').textContent =
+                (model === 'note' ? 'Vestaboard Note' : 'Vestaboard') + ' ' + rows + ' × ' + cols + ' Split-Flap';
+        }
+        function renderVestaGrid(chars, model) {
             const board = document.getElementById('vbBoard'); board.innerHTML = '';
+            const cols = (chars[0] || []).length || 22;
             const grid = document.createElement('div'); grid.className = 'vb-grid';
+            // Size the grid to the actual board (Note is 3x15, Flagship 6x22).
+            grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+            grid.style.minWidth = (cols * 29) + 'px';
             chars.forEach(function (row) { row.forEach(function (code) {
                 const cell = document.createElement('div'); cell.className = 'vb-cell';
                 if (VB_COLOR[code] !== undefined) { cell.style.background = VB_COLOR[code]; }
@@ -768,11 +999,12 @@ SIMULATOR_TEMPLATE = """
                 grid.appendChild(cell);
             }); });
             board.appendChild(grid);
+            if (model) setVbLabel(model);
         }
         async function vestaRequest(send) {
             const btn = document.getElementById(send ? 'vbPushBtn' : 'vbPreviewBtn');
             const cfg = currentBoardConfig();
-            const body = { route_id: cfg.route, direction: cfg.direction, wsdot_key: SETTINGS.wsdot_key };
+            const body = { route_id: cfg.route, direction: cfg.direction, model: cfg.model || 'flagship', wsdot_key: SETTINGS.wsdot_key };
             if (send) {
                 body.board_id = SETTINGS.vestaboard.selected || '';
                 if (cfg.key) { body.vestaboard_key = cfg.key; body.vestaboard_url = cfg.url; }
@@ -785,7 +1017,7 @@ SIMULATOR_TEMPLATE = """
                 const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 const ms = Math.round(performance.now() - start);
                 const data = await resp.json();
-                if (data.characters) renderVestaGrid(data.characters);
+                if (data.characters) renderVestaGrid(data.characters, data.model);
                 if (send) {
                     if (data.sent) setStatus('vbDot', 'vbStatus', 'vbTime', 'success', 'Pushed to Vestaboard', ms);
                     else setStatus('vbDot', 'vbStatus', 'vbTime', 'error', data.error || 'Push failed', ms);
@@ -805,6 +1037,7 @@ SIMULATOR_TEMPLATE = """
         // ---- init ----
         bindSync();
         loadSettings();
+        setInterval(loadScheduleStatus, 30000);
     </script>
 </body>
 </html>
@@ -1211,30 +1444,31 @@ def _vb_char(ch: str) -> int:
     return VB_CHAR_MAP.get(ch.upper(), 0)
 
 
-def _vb_row(left: str = "", right: str = "", center: Optional[str] = None) -> list:
+def _vb_row(left: str = "", right: str = "", center: Optional[str] = None,
+            cols: int = VB_COLS) -> list:
     """
-    Build a single 22-cell Vestaboard row.
+    Build a single Vestaboard row of ``cols`` cells.
 
     If ``center`` is given, that text is centered. Otherwise ``left`` is placed
     left-aligned and ``right`` right-aligned on the same row, with ``left``
     truncated first if the two would collide.
     """
     if center is not None:
-        codes = [_vb_char(c) for c in str(center)[:VB_COLS]]
-        pad = VB_COLS - len(codes)
+        codes = [_vb_char(c) for c in str(center)[:cols]]
+        pad = cols - len(codes)
         left_pad = pad // 2
         return [0] * left_pad + codes + [0] * (pad - left_pad)
 
     left = str(left)
     right = str(right)
     # Reserve at least one blank between left and right tokens.
-    max_left = VB_COLS - len(right) - (1 if right else 0)
+    max_left = cols - len(right) - (1 if right else 0)
     if len(left) > max_left:
         left = left[:max(max_left, 0)]
 
     left_codes = [_vb_char(c) for c in left]
     right_codes = [_vb_char(c) for c in right]
-    middle = VB_COLS - len(left_codes) - len(right_codes)
+    middle = cols - len(left_codes) - len(right_codes)
     return left_codes + [0] * middle + right_codes
 
 
@@ -1243,16 +1477,21 @@ def _fmt_time(t: Optional[datetime]) -> str:
     return t.strftime("%I:%M %p").lstrip("0") if t else "--"
 
 
-def _wrap_center_rows(text: str, max_rows: int) -> list:
-    """Word-wrap text into up to max_rows centered Vestaboard rows."""
+def _fmt_time_short(t: Optional[datetime]) -> str:
+    """Compact time like '6:30P' / '11:30A' for the narrow Note display."""
+    return t.strftime("%I:%M%p").lstrip("0")[:-1] if t else "--"
+
+
+def _wrap_center_rows(text: str, max_rows: int, cols: int = VB_COLS) -> list:
+    """Word-wrap text into up to max_rows centered rows of ``cols`` cells."""
     words = str(text).upper().split()
     lines, line = [], ""
     for word in words:
         candidate = f"{line} {word}".strip()
-        if len(candidate) > VB_COLS:
+        if len(candidate) > cols:
             if line:
                 lines.append(line)
-            line = word[:VB_COLS]
+            line = word[:cols]
             if len(lines) >= max_rows:
                 line = ""
                 break
@@ -1260,32 +1499,73 @@ def _wrap_center_rows(text: str, max_rows: int) -> list:
             line = candidate
     if line and len(lines) < max_rows:
         lines.append(line)
-    return [_vb_row(center=l) for l in lines[:max_rows]]
+    return [_vb_row(center=l, cols=cols) for l in lines[:max_rows]]
+
+
+def _departure_time_obj(status: Optional[Dict[str, Any]]) -> Optional[datetime]:
+    """Parse the ISO departure time back out of a status dict."""
+    iso = (status or {}).get("departure_time")
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso)
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_vestaboard_note(data, status, cols) -> list:
+    """Compact 3-row layout for the Vestaboard Note (3x15)."""
+    rows = []
+    if "error" in data:
+        rows.append(_vb_row(center="FERRY", cols=cols))
+        rows += _wrap_center_rows(data["error"], NOTE_ROWS - 1, cols=cols)
+    elif status is not None:
+        # Row 1: direction + time, using 3-letter terminal codes to fit 15 cells.
+        frm = status.get("from_short", "")[:3]
+        to = status.get("to_short", "")[:3]
+        when = _fmt_time_short(_departure_time_obj(status))
+        rows.append(_vb_row(center=(f"{frm}-{to} {when}" if to else f"{frm} {when}"), cols=cols))
+        # Row 2: spaces.
+        sp = status.get("spaces")
+        rows.append(_vb_row(center=f"SPACES: {sp if sp is not None else 'N/A'}", cols=cols))
+        # Row 3: delay indicator (no room for full text on a Note).
+        rows.append(_vb_row(center=("DELAYS" if status.get("delay") else "NO DELAYS"), cols=cols))
+    else:
+        rows.append(_vb_row(center=data.get("route_name", "FERRIES")[:cols], cols=cols))
+        rows.append(_vb_row(center="SET A ROUTE", cols=cols))
+    while len(rows) < NOTE_ROWS:
+        rows.append([0] * cols)
+    return rows[:NOTE_ROWS]
 
 
 def format_vestaboard_message(data: Dict[str, Any],
-                              status: Optional[Dict[str, Any]] = None) -> list:
+                              status: Optional[Dict[str, Any]] = None,
+                              model: str = "flagship") -> list:
     """
-    Lay ferry data out onto a 6-row x 22-column Vestaboard grid.
+    Lay ferry data out onto a Vestaboard grid, sized for the board model.
 
     Args:
         data: Output of :func:`format_ferry_data`.
         status: Optional output of :func:`compute_direction_status`. When given,
             renders the focused "next departure / spaces / delay" layout for the
             chosen route + direction. Otherwise falls back to a vessel list.
+        model: 'note' renders a 3x15 grid; anything else renders 6x22.
 
     Returns:
-        A list of 6 rows, each a list of 22 Vestaboard character codes.
+        A list of rows (3 or 6), each a list of character codes (15 or 22).
     """
-    rows = []
+    rows_n, cols_n = vb_dimensions(model)
+    if model == "note":
+        return _format_vestaboard_note(data, status, cols_n)
 
+    rows = []
     if "error" in data:
-        rows.append(_vb_row(center="FERRY ERROR"))
-        rows += _wrap_center_rows(data["error"], VB_ROWS - 1)
+        rows.append(_vb_row(center="FERRY ERROR", cols=cols_n))
+        rows += _wrap_center_rows(data["error"], rows_n - 1, cols=cols_n)
     elif status is not None:
         # Focused layout: route, direction + next departure, spaces, delay.
         header = VB_ROUTE_LABEL.get(status.get("route_id", ""), data.get("route_name", "FERRIES"))
-        rows.append(_vb_row(center=header))
+        rows.append(_vb_row(center=header, cols=cols_n))
 
         # The Vestaboard has no ">" glyph, so use "TO" for the direction.
         when = status.get("time_str", "--")
@@ -1293,40 +1573,39 @@ def format_vestaboard_message(data: Dict[str, Any],
             heading = f"{status['from_short']} TO {status['to_short']} {when}"
         else:
             heading = f"DEP {status['from_short']} {when}"
-        rows.append(_vb_row(center=heading))
+        rows.append(_vb_row(center=heading, cols=cols_n))
 
         sp = status.get("spaces")
-        rows.append(_vb_row(center=f"SPACES: {sp if sp is not None else 'N/A'}"))
+        rows.append(_vb_row(center=f"SPACES: {sp if sp is not None else 'N/A'}", cols=cols_n))
 
         delay = status.get("delay")
         if delay:
-            rows.append(_vb_row(center="DELAYS:"))
-            rows += _wrap_center_rows(delay, VB_ROWS - len(rows))
+            rows.append(_vb_row(center="DELAYS:", cols=cols_n))
+            rows += _wrap_center_rows(delay, rows_n - len(rows), cols=cols_n)
         else:
-            rows.append(_vb_row(center="NO DELAYS"))
+            rows.append(_vb_row(center="NO DELAYS", cols=cols_n))
     else:
-        rows.append(_vb_row(center=data.get("route_name", "FERRIES")))
+        rows.append(_vb_row(center=data.get("route_name", "FERRIES"), cols=cols_n))
 
         vessels = [v for v in data.get("vessels", []) if v.get("name") != "No vessels"]
         if not vessels:
-            rows.append(_vb_row(center="NO ACTIVE VESSELS"))
+            rows.append(_vb_row(center="NO ACTIVE VESSELS", cols=cols_n))
         else:
-            for vessel in vessels[:VB_ROWS - 2]:
+            for vessel in vessels[:rows_n - 2]:
                 vstatus = vessel.get("status", "")
                 short = VB_STATUS_SHORT.get(vstatus, vstatus[:4])
-                rows.append(_vb_row(left=vessel.get("name", ""), right=short))
+                rows.append(_vb_row(left=vessel.get("name", ""), right=short, cols=cols_n))
 
         spaces = data.get("terminal_spaces", {})
         if spaces:
             parts = [f"{term[:3]} {info.get('drive_up', 0)}" for term, info in spaces.items()]
-            rows.append(_vb_row(center="  ".join(parts)))
+            rows.append(_vb_row(center="  ".join(parts), cols=cols_n))
         else:
-            rows.append(_vb_row(right=data.get("update_time", "")))
+            rows.append(_vb_row(right=data.get("update_time", ""), cols=cols_n))
 
-    # Pad or truncate to exactly VB_ROWS rows.
-    while len(rows) < VB_ROWS:
-        rows.append([0] * VB_COLS)
-    return rows[:VB_ROWS]
+    while len(rows) < rows_n:
+        rows.append([0] * cols_n)
+    return rows[:rows_n]
 
 
 def send_to_vestaboard(characters: list, key: Optional[str] = None,
@@ -1364,6 +1643,64 @@ def send_to_vestaboard(characters: list, key: Optional[str] = None,
         return {"error": f"Failed to send to Vestaboard: {str(e)}"}
 
 
+# --- TRMNL webhook push -----------------------------------------------------
+
+def ferry_merge_variables(route: Optional[str], direction: Optional[str],
+                          wsdot_key: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Build the merge_variables payload for a TRMNL webhook push (and the JSON API).
+    Kept compact (TRMNL webhooks allow ~2 KB).
+    """
+    data = fetch_ferry_status(route or None, api_key=wsdot_key)
+    status = compute_direction_status(data, route, direction) if route else None
+    formatted = format_ferry_data(data)
+    return {
+        "route_name": formatted.get("route_name"),
+        "update_time": formatted.get("update_time"),
+        "status": status,
+        "vessels": formatted.get("vessels", [])[:MAX_VESSELS_DISPLAY],
+    }
+
+
+def send_to_trmnl(webhook_url: str, merge_variables: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Push merge_variables to a TRMNL private-plugin webhook.
+    See https://docs.trmnl.com/go/private-plugins/webhooks (rate limit: 1 / 5 min).
+    """
+    if not webhook_url:
+        return {"error": "TRMNL webhook URL not configured"}
+    try:
+        resp = requests.post(
+            webhook_url,
+            headers={"Content-Type": "application/json"},
+            json={"merge_variables": merge_variables},
+            timeout=10,
+        )
+        if resp.status_code == 429:
+            return {"error": "TRMNL rate limit (max once per 5 minutes)"}
+        resp.raise_for_status()
+        return {"status": "sent"}
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to send to TRMNL: {e}")
+        return {"error": f"Failed to send to TRMNL: {str(e)}"}
+
+
+def push_vestaboard_target(board: Dict[str, Any], wsdot_key: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch ferry data for a saved board's route/direction and push to it."""
+    route = board.get("route") or None
+    data = fetch_ferry_status(route, api_key=wsdot_key)
+    status = compute_direction_status(data, route, board.get("direction")) if route else None
+    formatted = format_ferry_data(data)
+    characters = format_vestaboard_message(formatted, status, model=board.get("model", "flagship"))
+    return send_to_vestaboard(characters, key=board.get("key") or None, url=board.get("url") or None)
+
+
+def push_trmnl_target(device: Dict[str, Any], wsdot_key: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch ferry data for a TRMNL device's route/direction and push via webhook."""
+    mv = ferry_merge_variables(device.get("route") or None, device.get("direction"), wsdot_key)
+    return send_to_trmnl(device.get("webhook_url"), mv)
+
+
 def _param(name: str, default: str = '') -> str:
     """
     Read a request parameter from the JSON body, then query string / form.
@@ -1392,23 +1729,41 @@ def _slugify(text: str) -> str:
     return slug or 'board'
 
 
+def _unique_id(raw: Any, name: str, seen: set) -> str:
+    """Return a unique id derived from raw or the name, tracked in ``seen``."""
+    bid = str(raw or '').strip() or _slugify(name)
+    base, n = bid, 2
+    while bid in seen:
+        bid = f"{base}-{n}"
+        n += 1
+    seen.add(bid)
+    return bid
+
+
+def _normalize_schedule(sched: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Coerce a target schedule to {enabled, interval_min}."""
+    sched = sched or {}
+    try:
+        interval = int(sched.get('interval_min', 30))
+    except (ValueError, TypeError):
+        interval = 30
+    interval = max(1, min(interval, 1440))
+    return {'enabled': bool(sched.get('enabled', False)), 'interval_min': interval}
+
+
 def _normalize_settings(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Coerce arbitrary input into the canonical settings shape."""
     data = data or {}
+
+    # Vestaboard boards
     vb = data.get('vestaboard') or {}
     boards = []
-    seen_ids = set()
+    seen_b = set()
     for entry in (vb.get('boards') or []):
         if not isinstance(entry, dict):
             continue
         name = str(entry.get('name') or '').strip() or 'Board'
-        bid = str(entry.get('id') or '').strip() or _slugify(name)
-        # Ensure ids are unique.
-        base_id, n = bid, 2
-        while bid in seen_ids:
-            bid = f"{base_id}-{n}"
-            n += 1
-        seen_ids.add(bid)
+        bid = _unique_id(entry.get('id'), name, seen_b)
         model = str(entry.get('model') or 'flagship').strip().lower()
         if model not in ('flagship', 'note'):
             model = 'flagship'
@@ -1420,15 +1775,40 @@ def _normalize_settings(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             'model': model,
             'route': str(entry.get('route') or '').strip(),
             'direction': str(entry.get('direction') or '').strip(),
+            'schedule': _normalize_schedule(entry.get('schedule')),
         })
-    selected = str(vb.get('selected') or '').strip()
-    if selected and selected not in seen_ids:
-        selected = ''
+    vb_selected = str(vb.get('selected') or '').strip()
+    if vb_selected and vb_selected not in seen_b:
+        vb_selected = ''
+
+    # TRMNL webhook push targets
+    tr = data.get('trmnl') or {}
+    devices = []
+    seen_t = set()
+    for entry in (tr.get('devices') or []):
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get('name') or '').strip() or 'TRMNL'
+        did = _unique_id(entry.get('id'), name, seen_t)
+        devices.append({
+            'id': did,
+            'name': name,
+            'webhook_url': str(entry.get('webhook_url') or '').strip(),
+            'route': str(entry.get('route') or '').strip(),
+            'direction': str(entry.get('direction') or '').strip(),
+            'schedule': _normalize_schedule(entry.get('schedule')),
+        })
+    tr_selected = str(tr.get('selected') or '').strip()
+    if tr_selected and tr_selected not in seen_t:
+        tr_selected = ''
+
     return {
         'site_url': str(data.get('site_url') or '').strip(),
         'route_id': str(data.get('route_id') or '').strip(),
+        'direction': str(data.get('direction') or '').strip(),
         'wsdot_key': str(data.get('wsdot_key') or '').strip(),
-        'vestaboard': {'selected': selected, 'boards': boards},
+        'vestaboard': {'selected': vb_selected, 'boards': boards},
+        'trmnl': {'selected': tr_selected, 'devices': devices},
     }
 
 
@@ -1525,7 +1905,9 @@ def api_info():
             "/webhook": "Main webhook endpoint for Trmnl (GET)",
             "/api/ferry-status": "JSON API endpoint (GET)",
             "/api/vestaboard": "Push ferry status to a Vestaboard device (GET/POST)",
-            "/api/settings": "Read/write persisted web UI settings (GET/POST)",
+            "/api/settings": "Read/write persisted settings & targets (GET/POST)",
+            "/api/push/<kind>/<id>": "Push a saved target now (POST)",
+            "/api/schedule/status": "Scheduler + last-push status (GET)",
             "/api/info": "API information (GET)",
             "/health": "Health check endpoint"
         },
@@ -1557,6 +1939,43 @@ def api_settings():
         incoming = request.get_json(silent=True) or {}
         return jsonify(save_settings(incoming))
     return jsonify(load_settings())
+
+
+@app.route('/api/schedule/status', methods=['GET'])
+def api_schedule_status():
+    """Last-push time / result for each current target, plus scheduler running state."""
+    state = _load_state()
+    settings = load_settings()
+    valid_vb = {b['id'] for b in settings['vestaboard']['boards']}
+    valid_tr = {d['id'] for d in settings['trmnl']['devices']}
+    return jsonify({
+        "scheduler_running": _scheduler_started,
+        "vestaboard": {k: v for k, v in state.get('vestaboard', {}).items() if k in valid_vb},
+        "trmnl": {k: v for k, v in state.get('trmnl', {}).items() if k in valid_tr},
+    })
+
+
+@app.route('/api/push/<kind>/<target_id>', methods=['POST'])
+def api_push(kind, target_id):
+    """Push a specific saved target now (kind = 'vestaboard' or 'trmnl')."""
+    settings = load_settings()
+    wsdot = settings.get('wsdot_key') or None
+
+    if kind == 'vestaboard':
+        target = next((b for b in settings['vestaboard']['boards'] if b['id'] == target_id), None)
+        if not target:
+            return jsonify({"error": "Unknown board"}), 404
+        result = push_vestaboard_target(target, wsdot)
+    elif kind == 'trmnl':
+        target = next((d for d in settings['trmnl']['devices'] if d['id'] == target_id), None)
+        if not target:
+            return jsonify({"error": "Unknown TRMNL device"}), 404
+        result = push_trmnl_target(target, wsdot)
+    else:
+        return jsonify({"error": "Unknown target kind"}), 400
+
+    _record_push(kind, target_id, result)
+    return jsonify(result), (200 if "error" not in result else 502)
 
 
 @app.route('/webhook', methods=['GET'])
@@ -1753,33 +2172,153 @@ def api_vestaboard():
     target = _resolve_vestaboard_target()
     route_id = target['route'] or FERRY_ROUTE_ID
     direction = target['direction']
+    model = target['model'] or 'flagship'
     vb_key = target['key'] or VESTABOARD_RW_KEY
     vb_url = target['url'] or VESTABOARD_RW_URL
+    rows_n, cols_n = vb_dimensions(model)
 
     # Send Discord notification if configured
     ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
     user_agent = request.headers.get('User-Agent', '')
     send_discord_notification('/api/vestaboard', route_id, ip_address, user_agent)
 
-    # Fetch, format, and lay out for the split-flap grid
+    # Fetch, format, and lay out for the split-flap grid (sized for the model)
     ferry_data = fetch_ferry_status(route_id, api_key=_effective_wsdot_key())
     status = compute_direction_status(ferry_data, route_id, direction) if route_id else None
     formatted_data = format_ferry_data(ferry_data)
-    characters = format_vestaboard_message(formatted_data, status)
+    characters = format_vestaboard_message(formatted_data, status, model=model)
+    meta = {"characters": characters, "model": model, "rows": rows_n, "cols": cols_n}
 
     if preview:
-        return jsonify({"characters": characters, "sent": False})
+        return jsonify({**meta, "sent": False})
 
     if not vb_key:
-        return jsonify({
-            "error": "Vestaboard Read/Write key not configured",
-            "characters": characters,
-            "sent": False,
-        }), 503
+        return jsonify({**meta, "error": "Vestaboard Read/Write key not configured", "sent": False}), 503
 
     result = send_to_vestaboard(characters, key=vb_key, url=vb_url)
     status_code = 200 if "error" not in result else 502
-    return jsonify({**result, "characters": characters, "sent": "error" not in result}), status_code
+    return jsonify({**result, **meta, "sent": "error" not in result}), status_code
+
+
+# --- Push scheduler ---------------------------------------------------------
+
+SCHEDULE_STATE_PATH = os.path.join(os.path.dirname(SETTINGS_PATH), 'schedule_state.json')
+SCHEDULER_TICK_SECONDS = 30
+TRMNL_MIN_INTERVAL_MIN = 5  # TRMNL webhooks are rate-limited to once / 5 minutes
+_state_lock = threading.Lock()
+_scheduler_started = False
+_scheduler_lock_fh = None
+
+
+def _load_state() -> Dict[str, Any]:
+    try:
+        with open(SCHEDULE_STATE_PATH) as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        state = {}
+    state.setdefault('vestaboard', {})
+    state.setdefault('trmnl', {})
+    return state
+
+
+def _save_state(state: Dict[str, Any]) -> None:
+    with _state_lock:
+        try:
+            os.makedirs(os.path.dirname(SCHEDULE_STATE_PATH), exist_ok=True)
+            tmp = SCHEDULE_STATE_PATH + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(state, f, indent=2)
+            os.replace(tmp, SCHEDULE_STATE_PATH)
+        except OSError as e:
+            logger.warning(f"Could not persist schedule state: {e}")
+
+
+def _record_push(kind: str, target_id: str, result: Dict[str, Any]) -> None:
+    """Record the outcome of a push for the admin status view."""
+    state = _load_state()
+    state.setdefault(kind, {})[target_id] = {
+        "last_push": datetime.now().isoformat(),
+        "ok": "error" not in result,
+        "message": result.get("error") or result.get("status") or "sent",
+    }
+    _save_state(state)
+
+
+def _target_due(kind: str, target_id: str, interval_min: int, state: Dict[str, Any]) -> bool:
+    """True if this target has never pushed or its interval has elapsed."""
+    entry = state.get(kind, {}).get(target_id)
+    floor = max(interval_min, TRMNL_MIN_INTERVAL_MIN if kind == 'trmnl' else 1)
+    if not entry or not entry.get("last_push"):
+        return True
+    try:
+        last = datetime.fromisoformat(entry["last_push"])
+    except (ValueError, TypeError):
+        return True
+    return datetime.now() >= last + timedelta(minutes=floor)
+
+
+def _scheduler_tick() -> None:
+    """One pass: push every enabled target whose interval has elapsed."""
+    settings = load_settings()
+    wsdot = settings.get("wsdot_key") or None
+    state = _load_state()
+
+    for board in settings["vestaboard"]["boards"]:
+        sch = board.get("schedule") or {}
+        if not sch.get("enabled") or not (board.get("key") or VESTABOARD_RW_KEY):
+            continue
+        if _target_due("vestaboard", board["id"], sch.get("interval_min", 30), state):
+            logger.info(f"Scheduled push -> Vestaboard '{board['name']}'")
+            _record_push("vestaboard", board["id"], push_vestaboard_target(board, wsdot))
+
+    for dev in settings["trmnl"]["devices"]:
+        sch = dev.get("schedule") or {}
+        if not sch.get("enabled") or not dev.get("webhook_url"):
+            continue
+        if _target_due("trmnl", dev["id"], sch.get("interval_min", 15), state):
+            logger.info(f"Scheduled push -> TRMNL '{dev['name']}'")
+            _record_push("trmnl", dev["id"], push_trmnl_target(dev, wsdot))
+
+
+def _scheduler_loop() -> None:
+    while True:
+        try:
+            _scheduler_tick()
+        except Exception as e:  # never let the loop die
+            logger.warning(f"Scheduler tick error: {e}")
+        time.sleep(SCHEDULER_TICK_SECONDS)
+
+
+def _acquire_scheduler_lock() -> bool:
+    """Hold an exclusive file lock so only one process runs the scheduler."""
+    global _scheduler_lock_fh
+    try:
+        os.makedirs(os.path.dirname(SETTINGS_PATH), exist_ok=True)
+        fh = open(os.path.join(os.path.dirname(SETTINGS_PATH), 'scheduler.lock'), 'w')
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _scheduler_lock_fh = fh  # keep the handle open to hold the lock
+        return True
+    except OSError:
+        return False
+
+
+def start_scheduler() -> None:
+    """Start the background push scheduler (once, in a single process)."""
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    if os.getenv("ENABLE_SCHEDULER", "false").lower() not in ("1", "true", "yes"):
+        return
+    if not _acquire_scheduler_lock():
+        logger.info("Scheduler lock held elsewhere; not starting in this process")
+        return
+    _scheduler_started = True
+    threading.Thread(target=_scheduler_loop, daemon=True, name="ferry-scheduler").start()
+    logger.info("Push scheduler started (tick %ss)", SCHEDULER_TICK_SECONDS)
+
+
+# Start under gunicorn (which imports app:app) as well as `python app.py`.
+start_scheduler()
 
 
 def main():
@@ -1788,11 +2327,11 @@ def main():
         logger.error("WSDOT_API_KEY environment variable is not set!")
         logger.error("Please copy .env.template to .env and configure your API key")
         return
-    
+
     logger.info(f"Starting Washington State Ferry Webhook Server")
     logger.info(f"Server will run on {FLASK_HOST}:{FLASK_PORT}")
     logger.info(f"Debug mode: {FLASK_DEBUG}")
-    
+
     app.run(
         host=FLASK_HOST,
         port=FLASK_PORT,

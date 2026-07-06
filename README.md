@@ -127,20 +127,36 @@ Use these route IDs when configuring your webhook URL:
 https://your-domain.com/webhook?route_id=sea-bi
 ```
 
-## Web Simulator
+## Control Panel
 
-The root page (`/`) is an interactive simulator with two tabs:
+The root page (`/`) is a control panel for previewing, scheduling, and pushing
+ferry status to your devices. It has two tabs:
 
-- **TRMNL** — previews how the ferry status renders on a TRMNL e-ink display.
-- **Vestaboard** — previews the 6×22 split-flap layout and can push it live to
-  your board.
+- **TRMNL** — preview how the status renders on a TRMNL e-ink display, and manage
+  **webhook push targets** (see below).
+- **Vestaboard** — preview the split-flap layout (6×22 Flagship or 3×15 Note) and
+  manage one or more boards.
 
-Each tab lets you enter/change API keys (WSDOT, and the Vestaboard Read/Write
-key) right in the browser — handy for testing before committing anything to
-`.env`. Keys are stored only in your browser's `localStorage` and are sent to
-your own server solely to make the test request; there's a "Forget saved keys"
-link to clear them. If the server already has a key configured via `.env`, the
-field shows a "server key configured" badge and can be left blank.
+**Targets & scheduling.** Add each device as a target — a Vestaboard (name, model,
+route, direction, Read/Write key) or a TRMNL device (name, route, direction,
+webhook URL). Each target has its own **schedule** (auto-push every N minutes) and
+a **Push now** button. A background scheduler pushes every enabled target on its
+interval; the header shows whether it's running and each target's last-push status.
+
+**Persistence.** All settings — WSDOT key, targets, keys, and schedules — are saved
+**on the server** as JSON (default `/app/data/settings.json`), so they survive
+restarts and are shared across browsers. Mount a volume at `/app/data` (the
+Compose files do this by default) to keep them. Because keys are stored in
+plaintext, keep this server on a trusted network (e.g. tailnet-only), not the
+public internet.
+
+### Pushing to TRMNL
+
+TRMNL normally *polls* your server (point a Polling plugin at `/api/trmnl`). To
+have the server **push** on a schedule instead, create a **Webhook** Private
+Plugin in your [TRMNL dashboard](https://usetrmnl.com/), paste its webhook URL
+into a TRMNL target, and enable a schedule. TRMNL rate-limits webhooks to once
+every 5 minutes, so intervals are floored at 5 min.
 
 ## API Endpoints
 
@@ -458,16 +474,19 @@ Build and run with Docker:
 # Build from project root
 docker build -f deployment/Dockerfile -t ferrytrmnl .
 
-# Run
-docker run -p 5050:5050 --env-file .env ferrytrmnl
+# Run with a named volume so targets/keys/schedules persist across restarts
+docker run -p 5050:5050 --env-file .env -v ferry-data:/app/data ferrytrmnl
 ```
 
-Or use docker-compose:
+Or use docker-compose (mounts the `ferry-data` volume for you):
 
 ```bash
 cd deployment
 docker-compose up -d
 ```
+
+The `-v ferry-data:/app/data` volume is what makes settings survive a restart —
+without it, saved targets and schedules are lost when the container is recreated.
 
 ### Pre-built Image from GHCR
 
@@ -489,7 +508,7 @@ echo "$GHCR_PAT" | docker login ghcr.io -u <github-username> --password-stdin
 Then run the published image directly:
 
 ```bash
-docker run -p 5050:5050 --env-file .env ghcr.io/cdibona/ferrynotifier:latest
+docker run -p 5050:5050 --env-file .env -v ferry-data:/app/data ghcr.io/cdibona/ferrynotifier:latest
 ```
 
 Or with Compose (pulls instead of building):

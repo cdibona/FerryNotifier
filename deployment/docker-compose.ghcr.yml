@@ -19,6 +19,9 @@ services:
     environment:
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5050
+    # Persist settings (targets, keys, schedules) across restarts.
+    volumes:
+      - ferry-data:/app/data
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5050/health"]
       interval: 30s
@@ -30,3 +33,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  ferry-data:
