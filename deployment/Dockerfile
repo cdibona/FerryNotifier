@@ -13,6 +13,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     FLASK_HOST=0.0.0.0 \
     FLASK_PORT=5050
 
+# Version metadata (passed in at build time, surfaced in the web UI footer)
+ARG APP_VERSION=dev
+ARG GIT_SHA=""
+ENV APP_VERSION=${APP_VERSION} \
+    GIT_SHA=${GIT_SHA}
+
 # Install system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \

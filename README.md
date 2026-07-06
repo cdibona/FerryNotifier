@@ -127,6 +127,21 @@ Use these route IDs when configuring your webhook URL:
 https://your-domain.com/webhook?route_id=sea-bi
 ```
 
+## Web Simulator
+
+The root page (`/`) is an interactive simulator with two tabs:
+
+- **TRMNL** — previews how the ferry status renders on a TRMNL e-ink display.
+- **Vestaboard** — previews the 6×22 split-flap layout and can push it live to
+  your board.
+
+Each tab lets you enter/change API keys (WSDOT, and the Vestaboard Read/Write
+key) right in the browser — handy for testing before committing anything to
+`.env`. Keys are stored only in your browser's `localStorage` and are sent to
+your own server solely to make the test request; there's a "Forget saved keys"
+link to clear them. If the server already has a key configured via `.env`, the
+field shows a "server key configured" badge and can be left blank.
+
 ## API Endpoints
 
 ### `GET /webhook`
@@ -167,14 +182,22 @@ curl http://localhost:5050/api/ferry-status
 Pushes the current ferry status to a [Vestaboard](https://www.vestaboard.com/)
 (or Vestaboard Note) device, laid out on the 6-row × 22-column split-flap grid.
 
-Requires `VESTABOARD_RW_KEY` to be set (a Read/Write API key from the Vestaboard
-app or [web.vestaboard.com](https://web.vestaboard.com)). Trigger it from a cron
+Requires a Read/Write API key — either `VESTABOARD_RW_KEY` in `.env` or a
+`vestaboard_key` supplied per request (see below). Get one from the Vestaboard
+app or [web.vestaboard.com](https://web.vestaboard.com). Trigger it from a cron
 job, a button, or any scheduler you like.
 
-**Query Parameters**:
+**Parameters** (query string, or JSON body on `POST`):
 - `route_id` (optional): Specific ferry route to display
 - `preview` (optional): If truthy (`1`/`true`/`yes`), returns the character grid
   as JSON **without** pushing to the board — handy for testing the layout
+- `wsdot_key` (optional): Override the WSDOT API key for this request
+- `vestaboard_key` (optional): Override the Vestaboard Read/Write key
+- `vestaboard_url` (optional): Override the Read/Write API endpoint
+
+The `wsdot_key` override is also accepted by `POST /api/trmnl/preview`. These
+overrides are what the web simulator uses to test with keys entered in the
+browser.
 
 **Example**:
 ```bash

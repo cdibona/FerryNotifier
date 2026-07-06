@@ -33,11 +33,14 @@ def test_app_routes():
 
     client = app.test_client()
 
-    # Test root endpoint (simulator frontend)
+    # Test root endpoint (simulator frontend) has both integration tabs
     response = client.get('/')
     assert response.status_code == 200
-    assert b'TRMNL Webhook Simulator' in response.data
-    assert b'Fetch Webhook' in response.data
+    assert b'Ferry Status Simulator' in response.data
+    assert b'data-tab="trmnl"' in response.data
+    assert b'data-tab="vestaboard"' in response.data
+    assert b'Fetch Preview' in response.data
+    assert b'Push to Board' in response.data
 
     # Test API info endpoint
     response = client.get('/api/info')
@@ -205,6 +208,30 @@ def test_vestaboard_preview_endpoint(mock_get):
     data = json.loads(response.data)
     assert data['sent'] is False
     assert len(data['characters']) == 6
+
+
+@patch.dict(os.environ, {
+    'WSDOT_API_KEY': 'env_key',
+    'FLASK_PORT': '5050'
+})
+@patch('app.requests.get')
+def test_wsdot_key_override(mock_get):
+    """A wsdot_key posted to the endpoint overrides the configured env key."""
+    from app import app
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = []
+    mock_response.raise_for_status = MagicMock()
+    mock_get.return_value = mock_response
+
+    client = app.test_client()
+    resp = client.post('/api/trmnl/preview', json={'route_id': 'sea-bi', 'wsdot_key': 'override_key'})
+    assert resp.status_code == 200
+
+    # The override key, not the env key, must be sent to WSDOT.
+    used_keys = [call.kwargs.get('params', {}).get('apiaccesscode') for call in mock_get.call_args_list]
+    assert 'override_key' in used_keys
+    assert 'env_key' not in used_keys
 
 
 if __name__ == '__main__':

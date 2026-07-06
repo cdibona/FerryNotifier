@@ -45,6 +45,11 @@ DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL', '')
 VESTABOARD_RW_KEY = os.getenv('VESTABOARD_RW_KEY', '')
 VESTABOARD_RW_URL = os.getenv('VESTABOARD_RW_URL', 'https://rw.vestaboard.com/')
 
+# Build/version metadata (injected at image build time via Docker build args).
+APP_VERSION = os.getenv('APP_VERSION', 'dev')
+GIT_SHA = os.getenv('GIT_SHA', '')
+GITHUB_REPO_URL = os.getenv('GITHUB_REPO_URL', 'https://github.com/cdibona/FerryNotifier')
+
 # Display configuration constants
 MAX_VESSELS_DISPLAY = 5  # Maximum number of vessels to display
 MAX_DEPARTURES_DISPLAY = 10  # Maximum number of departures to display
@@ -236,9 +241,7 @@ SIMULATOR_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TRMNL Webhook Simulator - WA Ferry Status</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             margin: 0;
@@ -246,54 +249,48 @@ SIMULATOR_TEMPLATE = """
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
         }
-        .simulator-container {
-            max-width: 900px;
-            margin: 0 auto;
-        }
-        .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 30px;
-        }
-        .header h1 {
-            margin: 0 0 10px 0;
-            font-size: 28px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
-        }
-        .header p {
-            margin: 0;
-            opacity: 0.9;
+        .simulator-container { max-width: 900px; margin: 0 auto; }
+        .header { text-align: center; color: white; margin-bottom: 24px; }
+        .header h1 { margin: 0 0 10px 0; font-size: 28px; text-shadow: 2px 2px 4px rgba(0,0,0,0.2); }
+        .header p { margin: 0; opacity: 0.9; font-size: 16px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 8px; margin-bottom: 0; }
+        .tab {
+            flex: 1;
+            padding: 14px 20px;
+            border: none;
+            border-radius: 12px 12px 0 0;
+            background: rgba(255,255,255,0.35);
+            color: #2a2250;
             font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
         }
+        .tab:hover { background: rgba(255,255,255,0.55); }
+        .tab.active { background: white; color: #333; }
+
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
         .controls {
             background: white;
-            border-radius: 12px;
+            border-radius: 0 12px 12px 12px;
             padding: 20px;
             margin-bottom: 20px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.1);
         }
-        .controls h2 {
-            margin: 0 0 15px 0;
-            font-size: 18px;
-            color: #333;
-        }
-        .form-row {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-            align-items: flex-end;
-        }
-        .form-group {
-            flex: 1;
-            min-width: 200px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-size: 14px;
-            color: #666;
-            font-weight: 500;
-        }
+        .controls h2 { margin: 0 0 6px 0; font-size: 18px; color: #333; }
+        .controls .hint { margin: 0 0 16px 0; font-size: 13px; color: #888; }
+        .form-row { display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end; }
+        .form-group { flex: 1; min-width: 200px; }
+        .form-group.wide { flex-basis: 100%; }
+        .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #666; font-weight: 500; }
+        .form-group .badge { font-size: 11px; font-weight: 600; color: #2e7d32; margin-left: 6px; }
+        .help-link { font-size: 12px; font-weight: 500; color: #667eea; margin-left: 8px; text-decoration: none; }
+        .help-link:hover { text-decoration: underline; }
+        .controls .hint a { color: #667eea; }
         .form-group input, .form-group select {
             width: 100%;
             padding: 10px 12px;
@@ -303,292 +300,248 @@ SIMULATOR_TEMPLATE = """
             transition: border-color 0.2s;
             background-color: white;
         }
-        .form-group input:focus, .form-group select:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        .btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        }
-        .btn-primary:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-        .btn-secondary {
-            background: #f0f0f0;
-            color: #333;
-        }
-        .btn-secondary:hover {
-            background: #e0e0e0;
-        }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #667eea; }
+        .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .btn-secondary { background: #f0f0f0; color: #333; }
+        .btn-secondary:hover { background: #e0e0e0; }
+        .btn-ghost { background: transparent; color: #667eea; padding: 12px 8px; }
+        .btn-ghost:hover { text-decoration: underline; }
         .webhook-url {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 12px;
-            margin-top: 15px;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 13px;
-            color: #666;
-            word-break: break-all;
+            background: #f8f9fa; border-radius: 8px; padding: 12px; margin-top: 15px;
+            font-family: 'Monaco', 'Menlo', monospace; font-size: 13px; color: #666; word-break: break-all;
         }
-        .webhook-url strong {
-            color: #333;
-        }
-        .trmnl-frame {
-            background: #2a2a2a;
-            border-radius: 20px;
-            padding: 20px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-        }
-        .trmnl-bezel {
-            background: #1a1a1a;
-            border-radius: 12px;
+        .webhook-url strong { color: #333; }
+
+        /* TRMNL display */
+        .trmnl-frame { background: #2a2a2a; border-radius: 20px; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+        .trmnl-bezel { background: #1a1a1a; border-radius: 12px; padding: 8px; }
+        .trmnl-screen { background: #f5f5f0; border-radius: 4px; min-height: 480px; position: relative; overflow: hidden; }
+        .trmnl-screen iframe { width: 100%; height: 480px; border: none; background: white; }
+        .trmnl-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 480px; color: #999; text-align: center; padding: 40px; }
+        .trmnl-placeholder svg { width: 80px; height: 80px; margin-bottom: 20px; opacity: 0.5; }
+        .trmnl-placeholder h3 { margin: 0 0 10px 0; color: #666; }
+        .trmnl-placeholder p { margin: 0; font-size: 14px; }
+        .device-label { text-align: center; color: #666; font-size: 12px; margin-top: 15px; letter-spacing: 2px; text-transform: uppercase; }
+        .loading-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.9); display: none; align-items: center; justify-content: center; flex-direction: column; }
+        .loading-overlay.active { display: flex; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { margin-top: 15px; color: #666; font-size: 14px; }
+
+        /* Vestaboard split-flap board */
+        .vb-frame { background: #2a2a2a; border-radius: 16px; padding: 18px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+        .vb-board-scroll { overflow-x: auto; }
+        .vb-grid {
+            display: grid;
+            grid-template-columns: repeat(22, 1fr);
+            gap: 3px;
+            min-width: 640px;
+            background: #000;
             padding: 8px;
+            border-radius: 6px;
         }
-        .trmnl-screen {
-            background: #f5f5f0;
-            border-radius: 4px;
-            min-height: 480px;
-            position: relative;
-            overflow: hidden;
+        .vb-cell {
+            aspect-ratio: 3 / 4;
+            background: #1c1c1c;
+            color: #f5f5f0;
+            display: flex; align-items: center; justify-content: center;
+            font-family: 'Courier New', monospace; font-weight: 700;
+            font-size: 15px;
+            border-radius: 3px;
+            border: 1px solid #050505;
+            box-shadow: inset 0 -6px 8px -6px rgba(0,0,0,0.8);
         }
-        .trmnl-screen iframe {
-            width: 100%;
-            height: 480px;
-            border: none;
-            background: white;
-        }
-        .trmnl-placeholder {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 480px;
-            color: #999;
-            text-align: center;
-            padding: 40px;
-        }
-        .trmnl-placeholder svg {
-            width: 80px;
-            height: 80px;
-            margin-bottom: 20px;
-            opacity: 0.5;
-        }
-        .trmnl-placeholder h3 {
-            margin: 0 0 10px 0;
-            color: #666;
-        }
-        .trmnl-placeholder p {
-            margin: 0;
-            font-size: 14px;
-        }
-        .trmnl-label {
-            text-align: center;
-            color: #666;
-            font-size: 12px;
-            margin-top: 15px;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-        }
-        .loading-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(255,255,255,0.9);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-        }
-        .loading-overlay.active {
-            display: flex;
-        }
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid #e0e0e0;
-            border-top-color: #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        .loading-text {
-            margin-top: 15px;
-            color: #666;
-            font-size: 14px;
-        }
-        .status-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 15px;
-            padding: 10px 15px;
-            background: white;
-            border-radius: 8px;
-            font-size: 13px;
-        }
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #ccc;
-        }
+        .vb-placeholder { padding: 60px 20px; text-align: center; color: #888; }
+
+        /* Status bar */
+        .status-bar { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding: 10px 15px; background: white; border-radius: 8px; font-size: 13px; }
+        .status-indicator { display: flex; align-items: center; gap: 8px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #ccc; }
         .status-dot.success { background: #4caf50; }
         .status-dot.error { background: #f44336; }
         .status-dot.loading { background: #ff9800; animation: pulse 1s infinite; }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .response-time {
-            color: #999;
-        }
-        .info-section {
-            background: white;
-            border-radius: 12px;
-            padding: 20px;
-            margin-top: 20px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        }
-        .info-section h3 {
-            margin: 0 0 15px 0;
-            font-size: 16px;
-            color: #333;
-        }
-        .endpoint-list {
-            display: grid;
-            gap: 10px;
-        }
-        .endpoint-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 6px;
-        }
-        .endpoint-method {
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
-            background: #e3f2fd;
-            color: #1976d2;
-        }
-        .endpoint-path {
-            font-family: monospace;
-            font-size: 14px;
-            color: #333;
-        }
-        .endpoint-desc {
-            color: #666;
-            font-size: 13px;
-            margin-left: auto;
-        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .response-time { color: #999; }
+
+        .info-section { background: white; border-radius: 12px; padding: 20px; margin-top: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .info-section h3 { margin: 0 0 15px 0; font-size: 16px; color: #333; }
+        .info-section .note { font-size: 12px; color: #999; margin-top: 14px; }
+        .endpoint-list { display: grid; gap: 10px; }
+        .endpoint-item { display: flex; align-items: center; gap: 10px; padding: 10px; background: #f8f9fa; border-radius: 6px; }
+        .endpoint-method { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; background: #e3f2fd; color: #1976d2; }
+        .endpoint-path { font-family: monospace; font-size: 14px; color: #333; }
+        .endpoint-desc { color: #666; font-size: 13px; margin-left: auto; }
+        .app-footer { text-align: center; color: rgba(255,255,255,0.85); font-size: 12px; margin-top: 22px; }
+        .app-footer a { color: #fff; font-family: 'Monaco', 'Menlo', monospace; text-decoration: underline; }
         @media (max-width: 600px) {
-            .form-row {
-                flex-direction: column;
-            }
-            .form-group {
-                min-width: 100%;
-            }
+            .form-row { flex-direction: column; }
+            .form-group { min-width: 100%; }
         }
     </style>
 </head>
 <body>
     <div class="simulator-container">
         <div class="header">
-            <h1>TRMNL Webhook Simulator</h1>
-            <p>Test how your WA State Ferry Status webhook renders on a TRMNL e-ink display</p>
+            <h1>Ferry Status Simulator</h1>
+            <p>Preview and push WA State Ferry status to TRMNL and Vestaboard</p>
         </div>
 
-        <div class="controls">
-            <h2>Webhook Configuration</h2>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="siteUrl">Site URL</label>
-                    <input type="text" id="siteUrl" placeholder="https://your-domain.com" value="{{ site_url }}">
-                </div>
-                <div class="form-group">
-                    <label for="routeId">Route (optional)</label>
-                    <select id="routeId">
-                        <option value="">All Routes</option>
-                        <option value="sea-bi"{% if route_id == 'sea-bi' %} selected{% endif %}>Seattle / Bainbridge Island</option>
-                        <option value="sea-br"{% if route_id == 'sea-br' %} selected{% endif %}>Seattle / Bremerton</option>
-                        <option value="ed-king"{% if route_id == 'ed-king' %} selected{% endif %}>Edmonds / Kingston</option>
-                        <option value="muk-cl"{% if route_id == 'muk-cl' %} selected{% endif %}>Mukilteo / Clinton</option>
-                        <option value="f-v-s"{% if route_id == 'f-v-s' %} selected{% endif %}>Fauntleroy / Vashon</option>
-                        <option value="f-s"{% if route_id == 'f-s' %} selected{% endif %}>Fauntleroy / Southworth</option>
-                        <option value="s-v"{% if route_id == 's-v' %} selected{% endif %}>Southworth / Vashon</option>
-                        <option value="pt-key"{% if route_id == 'pt-key' %} selected{% endif %}>Port Townsend / Coupeville</option>
-                        <option value="pd-tal"{% if route_id == 'pd-tal' %} selected{% endif %}>Pt. Defiance / Tahlequah</option>
-                        <option value="ana-sj"{% if route_id == 'ana-sj' %} selected{% endif %}>Anacortes / San Juan Islands</option>
-                    </select>
-                </div>
-                <button class="btn btn-primary" id="fetchBtn" onclick="fetchWebhook()">
-                    Fetch Webhook
-                </button>
-                <button class="btn btn-secondary" onclick="clearScreen()">
-                    Clear
-                </button>
-            </div>
-            <div class="webhook-url" id="webhookUrl">
-                <strong>Webhook URL:</strong> <span id="urlDisplay">Configure site URL above</span>
-            </div>
+        <div class="tabs">
+            <button class="tab active" data-tab="trmnl" onclick="showTab('trmnl')">TRMNL</button>
+            <button class="tab" data-tab="vestaboard" onclick="showTab('vestaboard')">Vestaboard</button>
         </div>
 
-        <div class="trmnl-frame">
-            <div class="trmnl-bezel">
-                <div class="trmnl-screen" id="screenContainer">
-                    <div class="trmnl-placeholder" id="placeholder">
-                        <svg viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                            <polyline points="3.27 6.96 12 12.01 20.73 6.96" fill="none" stroke="white" stroke-width="1.5"/>
-                            <line x1="12" y1="22.08" x2="12" y2="12" fill="none" stroke="white" stroke-width="1.5"/>
-                        </svg>
-                        <h3>TRMNL Display Preview</h3>
-                        <p>Click "Fetch Webhook" to simulate a TRMNL device<br>calling your webhook endpoint</p>
+        {% set routes = [
+            ['', 'All Routes'],
+            ['sea-bi', 'Seattle / Bainbridge Island'],
+            ['sea-br', 'Seattle / Bremerton'],
+            ['ed-king', 'Edmonds / Kingston'],
+            ['muk-cl', 'Mukilteo / Clinton'],
+            ['f-v-s', 'Fauntleroy / Vashon'],
+            ['f-s', 'Fauntleroy / Southworth'],
+            ['s-v', 'Southworth / Vashon'],
+            ['pt-key', 'Port Townsend / Coupeville'],
+            ['pd-tal', 'Pt. Defiance / Tahlequah'],
+            ['ana-sj', 'Anacortes / San Juan Islands']
+        ] %}
+
+        <!-- ===================== TRMNL TAB ===================== -->
+        <div class="tab-panel active" data-tab="trmnl">
+            <div class="controls">
+                <h2>TRMNL Configuration</h2>
+                <p class="hint">TRMNL polls your server for JSON; this previews how the e-ink display renders.
+                    Set up the polling plugin and find your device API key in your
+                    <a href="https://usetrmnl.com/" target="_blank" rel="noopener">TRMNL dashboard &#8599;</a>.</p>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Site URL</label>
+                        <input type="text" data-sync="siteUrl" placeholder="https://your-domain.com" value="{{ site_url }}">
                     </div>
-                    <iframe id="displayFrame" style="display: none;"></iframe>
-                    <div class="loading-overlay" id="loadingOverlay">
-                        <div class="spinner"></div>
-                        <div class="loading-text">Calling webhook...</div>
+                    <div class="form-group">
+                        <label>Route</label>
+                        <select data-sync="routeId">
+                            {% for r in routes %}
+                            <option value="{{ r[0] }}"{% if route_id == r[0] %} selected{% endif %}>{{ r[1] }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                 </div>
+                <div class="form-row" style="margin-top: 15px;">
+                    <div class="form-group wide">
+                        <label>WSDOT API Key
+                            {% if wsdot_env_set %}<span class="badge">server key configured</span>{% endif %}
+                            <a class="help-link" href="https://wsdot.wa.gov/traffic/api/" target="_blank" rel="noopener">get a key &#8599;</a>
+                        </label>
+                        <input type="password" data-sync="wsdotKey" placeholder="Leave blank to use the server's configured key" autocomplete="off">
+                    </div>
+                </div>
+                <div class="form-row" style="margin-top: 15px;">
+                    <button class="btn btn-primary" id="trmnlFetchBtn" onclick="fetchTrmnl()">Fetch Preview</button>
+                    <button class="btn btn-secondary" onclick="clearTrmnl()">Clear</button>
+                </div>
+                <div class="webhook-url">
+                    <strong>Polling URL:</strong> <span id="trmnlUrlDisplay">Configure site URL above</span>
+                </div>
             </div>
-            <div class="trmnl-label">TRMNL E-Ink Display Simulator</div>
+
+            <div class="trmnl-frame">
+                <div class="trmnl-bezel">
+                    <div class="trmnl-screen" id="trmnlScreen">
+                        <div class="trmnl-placeholder" id="trmnlPlaceholder">
+                            <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                            </svg>
+                            <h3>TRMNL Display Preview</h3>
+                            <p>Click "Fetch Preview" to render the ferry status<br>as it would appear on a TRMNL e-ink device</p>
+                        </div>
+                        <iframe id="trmnlFrame" style="display: none;"></iframe>
+                        <div class="loading-overlay" id="trmnlLoading">
+                            <div class="spinner"></div>
+                            <div class="loading-text">Rendering preview...</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="device-label">TRMNL E-Ink Display Simulator</div>
+            </div>
+
+            <div class="status-bar">
+                <div class="status-indicator">
+                    <div class="status-dot" id="trmnlDot"></div>
+                    <span id="trmnlStatus">Ready</span>
+                </div>
+                <div class="response-time" id="trmnlTime"></div>
+            </div>
         </div>
 
-        <div class="status-bar">
-            <div class="status-indicator">
-                <div class="status-dot" id="statusDot"></div>
-                <span id="statusText">Ready</span>
+        <!-- ===================== VESTABOARD TAB ===================== -->
+        <div class="tab-panel" data-tab="vestaboard">
+            <div class="controls">
+                <h2>Vestaboard Configuration</h2>
+                <p class="hint">Preview the 6&times;22 split-flap layout, or push it live to your Vestaboard (or Vestaboard Note).
+                    Enable the Read/Write API and copy your key from
+                    <a href="https://web.vestaboard.com/" target="_blank" rel="noopener">web.vestaboard.com &#8599;</a>
+                    (<a href="https://docs.vestaboard.com/docs/read-write-api/introduction" target="_blank" rel="noopener">docs</a>).</p>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Site URL</label>
+                        <input type="text" data-sync="siteUrl" placeholder="https://your-domain.com" value="{{ site_url }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Route</label>
+                        <select data-sync="routeId">
+                            {% for r in routes %}
+                            <option value="{{ r[0] }}"{% if route_id == r[0] %} selected{% endif %}>{{ r[1] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row" style="margin-top: 15px;">
+                    <div class="form-group">
+                        <label>WSDOT API Key
+                            {% if wsdot_env_set %}<span class="badge">server key configured</span>{% endif %}
+                            <a class="help-link" href="https://wsdot.wa.gov/traffic/api/" target="_blank" rel="noopener">get a key &#8599;</a>
+                        </label>
+                        <input type="password" data-sync="wsdotKey" placeholder="Leave blank to use the server's key" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label>Vestaboard Read/Write Key
+                            {% if vestaboard_env_set %}<span class="badge">server key configured</span>{% endif %}
+                            <a class="help-link" href="https://web.vestaboard.com/" target="_blank" rel="noopener">find your key &#8599;</a>
+                        </label>
+                        <input type="password" data-sync="vbKey" placeholder="Required to push (not for preview)" autocomplete="off">
+                    </div>
+                </div>
+                <div class="form-row" style="margin-top: 15px;">
+                    <div class="form-group wide">
+                        <label>Vestaboard API URL (optional)</label>
+                        <input type="text" data-sync="vbUrl" placeholder="https://rw.vestaboard.com/" autocomplete="off">
+                    </div>
+                </div>
+                <div class="form-row" style="margin-top: 15px;">
+                    <button class="btn btn-secondary" id="vbPreviewBtn" onclick="previewVesta()">Preview Grid</button>
+                    <button class="btn btn-primary" id="vbPushBtn" onclick="pushVesta()">Push to Board</button>
+                </div>
             </div>
-            <div class="response-time" id="responseTime"></div>
+
+            <div class="vb-frame">
+                <div class="vb-board-scroll">
+                    <div id="vbBoard">
+                        <div class="vb-placeholder">Click "Preview Grid" to render the split-flap layout</div>
+                    </div>
+                </div>
+                <div class="device-label">Vestaboard 6 &times; 22 Split-Flap</div>
+            </div>
+
+            <div class="status-bar">
+                <div class="status-indicator">
+                    <div class="status-dot" id="vbDot"></div>
+                    <span id="vbStatus">Ready</span>
+                </div>
+                <div class="response-time" id="vbTime"></div>
+            </div>
         </div>
 
         <div class="info-section">
@@ -605,173 +558,190 @@ SIMULATOR_TEMPLATE = """
                     <span class="endpoint-desc">TRMNL preview (HTML)</span>
                 </div>
                 <div class="endpoint-item">
+                    <span class="endpoint-method">POST</span>
+                    <span class="endpoint-path">/api/vestaboard</span>
+                    <span class="endpoint-desc">Push to Vestaboard</span>
+                </div>
+                <div class="endpoint-item">
                     <span class="endpoint-method">GET</span>
                     <span class="endpoint-path">/api/ferry-status</span>
                     <span class="endpoint-desc">Raw JSON API</span>
                 </div>
-                <div class="endpoint-item">
-                    <span class="endpoint-method">GET</span>
-                    <span class="endpoint-path">/health</span>
-                    <span class="endpoint-desc">Health check</span>
-                </div>
             </div>
+            <p class="note">
+                API keys you enter are saved only in this browser (localStorage) and sent to your
+                server solely to make the test request. <a href="#" onclick="clearSaved(); return false;">Forget saved keys</a>
+            </p>
+        </div>
+
+        <div class="app-footer">
+            FerryNotifier {{ app_version }}{% if git_sha %} &middot; <a href="{{ repo_url }}/commit/{{ git_sha }}" target="_blank" rel="noopener">{{ git_sha[:7] }}</a>{% endif %}
         </div>
     </div>
 
     <script>
-        // Initialize with current URL if no SITE_URL configured
-        const defaultUrl = '{{ site_url }}' || window.location.origin;
-        document.getElementById('siteUrl').value = defaultUrl;
-        updateWebhookUrl();
+        const VB_CODE_TO_CHAR = {{ vb_code_to_char|tojson }};
+        const VB_COLOR = {63:'#ef4444',64:'#f97316',65:'#eab308',66:'#22c55e',67:'#3b82f6',68:'#8b5cf6',69:'#f5f5f0',70:'#111111',71:'#f5f5f0'};
+        const STORE = 'ferrysim.';
 
-        // Update webhook URL display when inputs change
-        document.getElementById('siteUrl').addEventListener('input', updateWebhookUrl);
-        document.getElementById('routeId').addEventListener('change', updateWebhookUrl);
+        function noTrailingSlash(s) { while (s.endsWith('/')) s = s.slice(0, -1); return s; }
+        function cfg(key) { const el = document.querySelector('[data-sync="' + key + '"]'); return el ? el.value.trim() : ''; }
+        function siteBase() { return noTrailingSlash(cfg('siteUrl') || window.location.origin); }
 
-        function updateWebhookUrl() {
-            const siteUrl = document.getElementById('siteUrl').value.replace(/\\/$/, '');
-            const routeId = document.getElementById('routeId').value.trim();
-
-            let webhookUrl = siteUrl + '/api/trmnl';
-            if (routeId) {
-                webhookUrl += '?route_id=' + encodeURIComponent(routeId);
-            }
-
-            document.getElementById('urlDisplay').textContent = webhookUrl || 'Configure site URL above';
+        // ---- config persistence + cross-tab field sync ----
+        function loadConfig() {
+            document.querySelectorAll('[data-sync]').forEach(function (el) {
+                const v = localStorage.getItem(STORE + el.dataset.sync);
+                if (v !== null) el.value = v;
+            });
+        }
+        function bindSync() {
+            document.querySelectorAll('[data-sync]').forEach(function (el) {
+                const handler = function () {
+                    const k = el.dataset.sync;
+                    localStorage.setItem(STORE + k, el.value);
+                    document.querySelectorAll('[data-sync="' + k + '"]').forEach(function (o) {
+                        if (o !== el) o.value = el.value;
+                    });
+                    if (k === 'siteUrl' || k === 'routeId') updateTrmnlUrl();
+                };
+                el.addEventListener('input', handler);
+                el.addEventListener('change', handler);
+            });
+        }
+        function clearSaved() {
+            Object.keys(localStorage).filter(function (k) { return k.indexOf(STORE) === 0; })
+                .forEach(function (k) { localStorage.removeItem(k); });
+            document.querySelectorAll('[data-sync]').forEach(function (el) {
+                if (el.tagName === 'SELECT') el.selectedIndex = 0;
+                else el.value = (el.dataset.sync === 'siteUrl') ? window.location.origin : '';
+            });
+            updateTrmnlUrl();
         }
 
-        function setStatus(status, text, responseTime = null) {
-            const dot = document.getElementById('statusDot');
-            const statusText = document.getElementById('statusText');
-            const responseTimeEl = document.getElementById('responseTime');
-
-            dot.className = 'status-dot ' + status;
-            statusText.textContent = text;
-
-            if (responseTime !== null) {
-                responseTimeEl.textContent = 'Response time: ' + responseTime + 'ms';
-            } else {
-                responseTimeEl.textContent = '';
-            }
+        function showTab(name) {
+            document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
+            document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.toggle('active', p.dataset.tab === name); });
         }
 
-        async function fetchWebhook() {
-            const siteUrl = document.getElementById('siteUrl').value.replace(/\\/$/, '');
-            const routeId = document.getElementById('routeId').value.trim();
-            const fetchBtn = document.getElementById('fetchBtn');
-            const loadingOverlay = document.getElementById('loadingOverlay');
-            const placeholder = document.getElementById('placeholder');
-            const displayFrame = document.getElementById('displayFrame');
+        function setStatus(dotId, textId, timeId, state, text, ms) {
+            const dot = document.getElementById(dotId);
+            dot.className = 'status-dot ' + (state || '');
+            document.getElementById(textId).textContent = text;
+            document.getElementById(timeId).textContent = (ms != null) ? ('Response time: ' + ms + 'ms') : '';
+        }
 
-            if (!siteUrl) {
-                alert('Please enter a Site URL');
-                return;
-            }
+        function updateTrmnlUrl() {
+            const route = cfg('routeId');
+            let url = siteBase() + '/api/trmnl';
+            if (route) url += '?route_id=' + encodeURIComponent(route);
+            document.getElementById('trmnlUrlDisplay').textContent = url || 'Configure site URL above';
+        }
 
-            let webhookUrl = siteUrl + '/api/trmnl/preview';
-            if (routeId) {
-                webhookUrl += '?route_id=' + encodeURIComponent(routeId);
-            }
+        // ---- TRMNL preview ----
+        async function fetchTrmnl() {
+            const btn = document.getElementById('trmnlFetchBtn');
+            const loading = document.getElementById('trmnlLoading');
+            const placeholder = document.getElementById('trmnlPlaceholder');
+            const frame = document.getElementById('trmnlFrame');
+            const body = { route_id: cfg('routeId'), wsdot_key: cfg('wsdotKey') };
 
-            // Show loading state
-            fetchBtn.disabled = true;
-            loadingOverlay.classList.add('active');
+            btn.disabled = true;
+            loading.classList.add('active');
             placeholder.style.display = 'none';
-            displayFrame.style.display = 'none';
-            setStatus('loading', 'Fetching webhook...');
-
-            const startTime = performance.now();
-
+            frame.style.display = 'none';
+            setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', 'loading', 'Rendering preview...');
+            const start = performance.now();
             try {
-                const response = await fetch(webhookUrl);
-                const endTime = performance.now();
-                const responseTime = Math.round(endTime - startTime);
-
-                if (!response.ok) {
-                    throw new Error('HTTP ' + response.status + ': ' + response.statusText);
-                }
-
-                const html = await response.text();
-
-                // Display the response in the iframe
-                displayFrame.style.display = 'block';
-                displayFrame.srcdoc = html;
-
-                setStatus('success', 'Webhook loaded successfully', responseTime);
-
-            } catch (error) {
-                console.error('Fetch error:', error);
-
-                // Show error in the display
-                displayFrame.style.display = 'block';
-                displayFrame.srcdoc = `
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <style>
-                            body {
-                                font-family: Arial, sans-serif;
-                                padding: 40px;
-                                text-align: center;
-                                color: #cc0000;
-                            }
-                            h2 { margin-bottom: 20px; }
-                            .error-details {
-                                background: #fff5f5;
-                                border: 1px solid #ffcccc;
-                                padding: 20px;
-                                border-radius: 8px;
-                                margin-top: 20px;
-                                text-align: left;
-                            }
-                            code {
-                                background: #f0f0f0;
-                                padding: 2px 6px;
-                                border-radius: 4px;
-                            }
-                        </style>
-                    </head>
-                    <body>
-                        <h2>Failed to Fetch Webhook</h2>
-                        <p>${error.message}</p>
-                        <div class="error-details">
-                            <strong>Troubleshooting:</strong>
-                            <ul>
-                                <li>Check that the Site URL is correct</li>
-                                <li>Ensure the webhook server is running</li>
-                                <li>Verify CORS is enabled if accessing cross-origin</li>
-                                <li>Check browser console for more details</li>
-                            </ul>
-                            <p><strong>Attempted URL:</strong> <code>${webhookUrl}</code></p>
-                        </div>
-                    </body>
-                    </html>
-                `;
-
-                setStatus('error', 'Error: ' + error.message);
-
+                const resp = await fetch(siteBase() + '/api/trmnl/preview', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+                });
+                const ms = Math.round(performance.now() - start);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
+                const html = await resp.text();
+                frame.style.display = 'block';
+                frame.srcdoc = html;
+                setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', 'success', 'Preview rendered', ms);
+            } catch (err) {
+                placeholder.style.display = 'flex';
+                setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', 'error', 'Error: ' + err.message);
             } finally {
-                fetchBtn.disabled = false;
-                loadingOverlay.classList.remove('active');
+                btn.disabled = false;
+                loading.classList.remove('active');
             }
         }
-
-        function clearScreen() {
-            const placeholder = document.getElementById('placeholder');
-            const displayFrame = document.getElementById('displayFrame');
-
-            placeholder.style.display = 'flex';
-            displayFrame.style.display = 'none';
-            displayFrame.srcdoc = '';
-
-            setStatus('', 'Ready');
-            document.getElementById('responseTime').textContent = '';
+        function clearTrmnl() {
+            document.getElementById('trmnlPlaceholder').style.display = 'flex';
+            const frame = document.getElementById('trmnlFrame');
+            frame.style.display = 'none';
+            frame.srcdoc = '';
+            setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', '', 'Ready');
         }
 
-        // Allow Enter key to trigger fetch
-        document.getElementById('siteUrl').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') fetchWebhook();
-        });
+        // ---- Vestaboard ----
+        function renderVestaGrid(chars) {
+            const board = document.getElementById('vbBoard');
+            board.innerHTML = '';
+            const grid = document.createElement('div');
+            grid.className = 'vb-grid';
+            chars.forEach(function (row) {
+                row.forEach(function (code) {
+                    const cell = document.createElement('div');
+                    cell.className = 'vb-cell';
+                    if (VB_COLOR[code] !== undefined) {
+                        cell.style.background = VB_COLOR[code];
+                    } else {
+                        const ch = VB_CODE_TO_CHAR[code];
+                        cell.textContent = (ch && ch !== ' ') ? ch : '';
+                    }
+                    grid.appendChild(cell);
+                });
+            });
+            board.appendChild(grid);
+        }
+
+        async function vestaRequest(send) {
+            const btn = document.getElementById(send ? 'vbPushBtn' : 'vbPreviewBtn');
+            const body = {
+                route_id: cfg('routeId'),
+                wsdot_key: cfg('wsdotKey'),
+                vestaboard_key: cfg('vbKey'),
+                vestaboard_url: cfg('vbUrl')
+            };
+            const url = siteBase() + '/api/vestaboard' + (send ? '' : '?preview=true');
+            btn.disabled = true;
+            setStatus('vbDot', 'vbStatus', 'vbTime', 'loading', send ? 'Pushing to board...' : 'Building preview...');
+            const start = performance.now();
+            try {
+                const resp = await fetch(url, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+                });
+                const ms = Math.round(performance.now() - start);
+                const data = await resp.json();
+                if (data.characters) renderVestaGrid(data.characters);
+                if (send) {
+                    if (data.sent) setStatus('vbDot', 'vbStatus', 'vbTime', 'success', 'Pushed to Vestaboard', ms);
+                    else setStatus('vbDot', 'vbStatus', 'vbTime', 'error', data.error || 'Push failed', ms);
+                } else {
+                    setStatus('vbDot', 'vbStatus', 'vbTime', 'success', 'Preview rendered (not sent)', ms);
+                }
+            } catch (err) {
+                setStatus('vbDot', 'vbStatus', 'vbTime', 'error', 'Error: ' + err.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+        function previewVesta() { vestaRequest(false); }
+        function pushVesta() { vestaRequest(true); }
+
+        // ---- init ----
+        loadConfig();
+        bindSync();
+        if (!cfg('siteUrl')) {
+            const el = document.querySelector('[data-sync="siteUrl"]');
+            if (el) el.value = window.location.origin;
+        }
+        updateTrmnlUrl();
     </script>
 </body>
 </html>
@@ -821,22 +791,24 @@ def parse_wsdot_date(date_str: Optional[str]) -> Optional[datetime]:
     return None
 
 
-def fetch_ferry_status(route_id: Optional[str] = None) -> Dict[str, Any]:
+def fetch_ferry_status(route_id: Optional[str] = None, api_key: Optional[str] = None) -> Dict[str, Any]:
     """
     Fetch ferry status from WSDOT API.
 
     Args:
         route_id: Optional specific route ID to fetch
+        api_key: Optional WSDOT API key override (falls back to WSDOT_API_KEY)
 
     Returns:
         Dictionary containing ferry status data
     """
-    if not WSDOT_API_KEY:
+    effective_key = api_key or WSDOT_API_KEY
+    if not effective_key:
         logger.error("WSDOT_API_KEY not configured")
         return {"error": "API key not configured"}
 
     route = route_id or FERRY_ROUTE_ID
-    params = {"apiaccesscode": WSDOT_API_KEY}
+    params = {"apiaccesscode": effective_key}
 
     try:
         # Fetch vessel locations
@@ -1086,20 +1058,28 @@ def format_vestaboard_message(data: Dict[str, Any]) -> list:
     return rows[:VB_ROWS]
 
 
-def send_to_vestaboard(characters: list) -> Dict[str, Any]:
+def send_to_vestaboard(characters: list, key: Optional[str] = None,
+                       url: Optional[str] = None) -> Dict[str, Any]:
     """
-    Push a 6x22 character grid to the configured Vestaboard via the Read/Write API.
+    Push a 6x22 character grid to a Vestaboard via the Read/Write API.
+
+    Args:
+        characters: 6x22 grid of Vestaboard character codes.
+        key: Optional Read/Write key override (falls back to VESTABOARD_RW_KEY).
+        url: Optional endpoint override (falls back to VESTABOARD_RW_URL).
 
     Returns a result dict with either ``status`` or ``error``.
     """
-    if not VESTABOARD_RW_KEY:
+    rw_key = key or VESTABOARD_RW_KEY
+    rw_url = url or VESTABOARD_RW_URL
+    if not rw_key:
         return {"error": "Vestaboard Read/Write key not configured"}
 
     try:
         response = requests.post(
-            VESTABOARD_RW_URL,
+            rw_url,
             headers={
-                "X-Vestaboard-Read-Write-Key": VESTABOARD_RW_KEY,
+                "X-Vestaboard-Read-Write-Key": rw_key,
                 "Content-Type": "application/json",
             },
             json={"characters": characters},
@@ -1111,6 +1091,20 @@ def send_to_vestaboard(characters: list) -> Dict[str, Any]:
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to send to Vestaboard: {e}")
         return {"error": f"Failed to send to Vestaboard: {str(e)}"}
+
+
+def _param(name: str, default: str = '') -> str:
+    """
+    Read a request parameter from the JSON body, then query string / form.
+
+    Lets the simulator (and API clients) pass optional overrides such as
+    ``wsdot_key`` or ``vestaboard_key`` on a per-request basis.
+    """
+    body = request.get_json(silent=True) if request.is_json else None
+    if isinstance(body, dict) and body.get(name) not in (None, ''):
+        return str(body[name])
+    val = request.values.get(name)
+    return val if val not in (None, '') else default
 
 
 def get_site_url() -> str:
@@ -1125,10 +1119,18 @@ def get_site_url() -> str:
 def index():
     """Root endpoint - serves the webhook simulator frontend."""
     site_url = get_site_url()
+    # Reverse map (code -> character) so the browser can render a Vestaboard grid.
+    vb_code_to_char = {code: char for char, code in VB_CHAR_MAP.items()}
     return render_template_string(
         SIMULATOR_TEMPLATE,
         site_url=site_url,
-        route_id=FERRY_ROUTE_ID
+        route_id=FERRY_ROUTE_ID,
+        vb_code_to_char=vb_code_to_char,
+        wsdot_env_set=bool(WSDOT_API_KEY),
+        vestaboard_env_set=bool(VESTABOARD_RW_KEY),
+        app_version=APP_VERSION,
+        git_sha=GIT_SHA,
+        repo_url=GITHUB_REPO_URL,
     )
 
 
@@ -1270,16 +1272,18 @@ TRMNL_PREVIEW_TEMPLATE = """
 """
 
 
-@app.route('/api/trmnl/preview', methods=['GET'])
+@app.route('/api/trmnl/preview', methods=['GET', 'POST'])
 def api_trmnl_preview():
     """
     TRMNL preview endpoint.
     Returns HTML rendered like TRMNL would display it.
+
+    Accepts optional ``route_id`` and ``wsdot_key`` overrides (query or JSON body).
     """
     logger.info("TRMNL preview endpoint called")
 
-    # Get optional route_id from query parameters
-    route_id = request.args.get('route_id', FERRY_ROUTE_ID)
+    route_id = _param('route_id', FERRY_ROUTE_ID)
+    wsdot_key = _param('wsdot_key') or None
 
     # Send Discord notification if configured
     ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -1287,7 +1291,7 @@ def api_trmnl_preview():
     send_discord_notification('/api/trmnl/preview', route_id, ip_address, user_agent)
 
     # Fetch and format ferry data
-    ferry_data = fetch_ferry_status(route_id)
+    ferry_data = fetch_ferry_status(route_id, api_key=wsdot_key)
     formatted_data = format_ferry_data(ferry_data)
 
     # Render with TRMNL-style template
@@ -1306,8 +1310,11 @@ def api_vestaboard():
     """
     logger.info("Vestaboard endpoint called")
 
-    route_id = request.args.get('route_id', FERRY_ROUTE_ID)
-    preview = request.args.get('preview', '').lower() in ('1', 'true', 'yes')
+    route_id = _param('route_id', FERRY_ROUTE_ID)
+    preview = _param('preview').lower() in ('1', 'true', 'yes')
+    wsdot_key = _param('wsdot_key') or None
+    vb_key = _param('vestaboard_key') or VESTABOARD_RW_KEY
+    vb_url = _param('vestaboard_url') or VESTABOARD_RW_URL
 
     # Send Discord notification if configured
     ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -1315,21 +1322,21 @@ def api_vestaboard():
     send_discord_notification('/api/vestaboard', route_id, ip_address, user_agent)
 
     # Fetch, format, and lay out for the split-flap grid
-    ferry_data = fetch_ferry_status(route_id)
+    ferry_data = fetch_ferry_status(route_id, api_key=wsdot_key)
     formatted_data = format_ferry_data(ferry_data)
     characters = format_vestaboard_message(formatted_data)
 
     if preview:
         return jsonify({"characters": characters, "sent": False})
 
-    if not VESTABOARD_RW_KEY:
+    if not vb_key:
         return jsonify({
             "error": "Vestaboard Read/Write key not configured",
             "characters": characters,
             "sent": False,
         }), 503
 
-    result = send_to_vestaboard(characters)
+    result = send_to_vestaboard(characters, key=vb_key, url=vb_url)
     status_code = 200 if "error" not in result else 502
     return jsonify({**result, "characters": characters, "sent": "error" not in result}), status_code
 
