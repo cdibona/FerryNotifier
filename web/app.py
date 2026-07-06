@@ -62,6 +62,11 @@ SETTINGS_PATH = os.getenv(
 )
 _settings_lock = threading.Lock()
 
+# Poll WSDOT at most once per this many seconds per route (shared cache).
+WSDOT_CACHE_SECONDS = int(os.getenv('WSDOT_CACHE_SECONDS', '300'))
+_ferry_cache: Dict[Any, Any] = {}
+_ferry_cache_lock = threading.Lock()
+
 # Display configuration constants
 MAX_VESSELS_DISPLAY = 5  # Maximum number of vessels to display
 MAX_DEPARTURES_DISPLAY = 10  # Maximum number of departures to display
@@ -484,10 +489,15 @@ SIMULATOR_TEMPLATE = """
                         </div>
                     </div>
                     <div class="form-row sched-row" style="margin-top: 15px;">
-                        <label class="sched-toggle"><input type="checkbox" id="deSchedEnabled"> Auto-push on a schedule</label>
-                        <span class="sched-int">every <input type="number" id="deSchedInterval" min="5" max="1440" value="15" style="width:70px"> min</span>
-                        <span class="target-status" id="deStatus"></span>
+                        <label class="sched-toggle"><input type="checkbox" id="deSchedEnabled"> Auto-push</label>
+                        <select id="deSchedMode" onchange="onDeSchedMode()" style="width:auto">
+                            <option value="aligned">aligned to refresh (min 13 of 15)</option>
+                            <option value="interval">every N minutes</option>
+                        </select>
+                        <span class="sched-int" id="deIntWrap">every
+                            <input type="number" id="deSchedInterval" min="5" max="1440" value="15" style="width:64px"> min</span>
                     </div>
+                    <div class="form-row"><span class="target-status" id="deStatus" style="margin-left:0"></span></div>
                     <div class="form-row" style="margin-top: 15px;">
                         <button class="btn btn-secondary" onclick="saveDevice()">Save Device</button>
                         <button class="btn btn-primary" id="dePushNowBtn" onclick="pushDeviceNow()">Push now</button>
@@ -528,7 +538,7 @@ SIMULATOR_TEMPLATE = """
                         </div>
                         <div class="form-group">
                             <label>Model</label>
-                            <select id="beModel" onchange="setVbLabel(this.value)">
+                            <select id="beModel" onchange="setVbLabel(this.value); previewVestaSoon()">
                                 <option value="flagship">Vestaboard (Flagship)</option>
                                 <option value="note">Vestaboard Note</option>
                             </select>
@@ -543,7 +553,7 @@ SIMULATOR_TEMPLATE = """
                         </div>
                         <div class="form-group">
                             <label>Direction</label>
-                            <select id="beDir"></select>
+                            <select id="beDir" onchange="previewVestaSoon()"></select>
                         </div>
                     </div>
                     <div class="form-row" style="margin-top: 15px;">
@@ -559,10 +569,17 @@ SIMULATOR_TEMPLATE = """
                         </div>
                     </div>
                     <div class="form-row sched-row" style="margin-top: 15px;">
-                        <label class="sched-toggle"><input type="checkbox" id="beSchedEnabled"> Auto-push on a schedule</label>
-                        <span class="sched-int">every <input type="number" id="beSchedInterval" min="1" max="1440" value="30" style="width:70px"> min</span>
-                        <span class="target-status" id="beStatus"></span>
+                        <label class="sched-toggle"><input type="checkbox" id="beSchedEnabled"> Auto-push</label>
+                        <select id="beSchedMode" onchange="onBeSchedMode()" style="width:auto">
+                            <option value="smart">on arrivals &amp; space changes</option>
+                            <option value="interval">every N minutes</option>
+                        </select>
+                        <span class="sched-int"><span id="beIntLabel">at least every</span>
+                            <input type="number" id="beSchedInterval" min="1" max="1440" value="15" style="width:64px"> min</span>
+                        <span class="sched-int" id="bePctWrap">, or spaces change &gt;
+                            <input type="number" id="beSchedPct" min="1" max="100" value="25" style="width:56px">% of capacity</span>
                     </div>
+                    <div class="form-row"><span class="target-status" id="beStatus" style="margin-left:0"></span></div>
                     <div class="form-row" style="margin-top: 15px;">
                         <button class="btn btn-secondary" onclick="saveBoard()">Save Board</button>
                         <button class="btn btn-primary" id="bePushNowBtn" onclick="pushBoardNow()">Push now</button>
@@ -663,6 +680,8 @@ SIMULATOR_TEMPLATE = """
             renderDeviceOptions();
             updateTrmnlUrl();
             loadScheduleStatus();
+            previewTrmnlSoon();
+            previewVestaSoon();
         }
         function applySettingsToFields() {
             document.querySelectorAll('[data-sync]').forEach(function (el) { el.value = SETTINGS[el.dataset.sync] || ''; });
@@ -717,9 +736,9 @@ SIMULATOR_TEMPLATE = """
         function refreshTrmnlDir() {
             SETTINGS.route_id = val('route_id') || document.querySelector('[data-sync="route_id"]').value;
             SETTINGS.direction = populateDirSelect(document.getElementById('trmnlDir'), SETTINGS.route_id, '');
-            updateTrmnlUrl(); saveSettingsDebounced();
+            updateTrmnlUrl(); saveSettingsDebounced(); previewTrmnlSoon();
         }
-        function onTrmnlDir() { SETTINGS.direction = document.getElementById('trmnlDir').value; updateTrmnlUrl(); saveSettingsDebounced(); }
+        function onTrmnlDir() { SETTINGS.direction = document.getElementById('trmnlDir').value; updateTrmnlUrl(); saveSettingsDebounced(); previewTrmnlSoon(); }
         function updateTrmnlUrl() {
             let url = siteBase() + '/api/trmnl';
             const q = [];
@@ -742,7 +761,7 @@ SIMULATOR_TEMPLATE = """
             const b = boardById(cur);
             if (b) showEditor(b); else hideEditor();
         }
-        function refreshBoardDir() { populateDirSelect(document.getElementById('beDir'), val('beRoute'), ''); }
+        function refreshBoardDir() { populateDirSelect(document.getElementById('beDir'), val('beRoute'), ''); previewVestaSoon(); }
         function showEditor(b) {
             editingNew = false;
             document.getElementById('boardEditorTitle').textContent = 'Edit board';
@@ -752,8 +771,12 @@ SIMULATOR_TEMPLATE = """
             populateDirSelect(document.getElementById('beDir'), b.route || '', b.direction || '');
             document.getElementById('beKey').value = b.key || '';
             document.getElementById('beUrl').value = b.url || '';
-            document.getElementById('beSchedEnabled').checked = !!(b.schedule && b.schedule.enabled);
-            document.getElementById('beSchedInterval').value = (b.schedule && b.schedule.interval_min) || 30;
+            var bs = b.schedule || {};
+            document.getElementById('beSchedEnabled').checked = !!bs.enabled;
+            document.getElementById('beSchedMode').value = bs.mode || 'smart';
+            document.getElementById('beSchedInterval').value = bs.interval_min || 15;
+            document.getElementById('beSchedPct').value = bs.spaces_pct || 25;
+            onBeSchedMode();
             document.getElementById('beDeleteBtn').style.display = '';
             document.getElementById('boardEditor').style.display = '';
             setVbLabel(b.model || 'flagship');
@@ -769,7 +792,10 @@ SIMULATOR_TEMPLATE = """
             document.getElementById('beKey').value = '';
             document.getElementById('beUrl').value = '';
             document.getElementById('beSchedEnabled').checked = false;
-            document.getElementById('beSchedInterval').value = 30;
+            document.getElementById('beSchedMode').value = 'smart';
+            document.getElementById('beSchedInterval').value = 15;
+            document.getElementById('beSchedPct').value = 25;
+            onBeSchedMode();
             document.getElementById('beStatus').textContent = '';
             document.getElementById('beDeleteBtn').style.display = 'none';
             document.getElementById('boardEditor').style.display = '';
@@ -791,16 +817,37 @@ SIMULATOR_TEMPLATE = """
             const b = boardById(v);
             if (b) showEditor(b); else hideEditor();
             saveSettingsNow();
+            previewVestaSoon();
         }
-        function scheduleFrom(enabledId, intervalId, floor) {
-            return { enabled: document.getElementById(enabledId).checked,
-                     interval_min: Math.max(floor || 1, parseInt(val(intervalId), 10) || 30) };
+        function boardScheduleFrom() {
+            return {
+                enabled: document.getElementById('beSchedEnabled').checked,
+                mode: val('beSchedMode') || 'smart',
+                interval_min: Math.max(1, parseInt(val('beSchedInterval'), 10) || 15),
+                spaces_pct: Math.max(1, Math.min(100, parseInt(val('beSchedPct'), 10) || 25)),
+            };
+        }
+        function deviceScheduleFrom() {
+            return {
+                enabled: document.getElementById('deSchedEnabled').checked,
+                mode: val('deSchedMode') || 'aligned',
+                interval_min: Math.max(5, parseInt(val('deSchedInterval'), 10) || 15),
+                align_period_min: 15, align_offset_min: 13,
+            };
+        }
+        function onBeSchedMode() {
+            const smart = val('beSchedMode') === 'smart';
+            document.getElementById('bePctWrap').style.display = smart ? '' : 'none';
+            document.getElementById('beIntLabel').textContent = smart ? 'at least every' : 'every';
+        }
+        function onDeSchedMode() {
+            document.getElementById('deIntWrap').style.display = (val('deSchedMode') === 'aligned') ? 'none' : '';
         }
         async function saveBoard() {
             const name = val('beName') || 'Board';
             const fields = { name: name, model: val('beModel') || 'flagship', route: val('beRoute'),
                 direction: val('beDir'), key: val('beKey'), url: val('beUrl'),
-                schedule: scheduleFrom('beSchedEnabled', 'beSchedInterval', 1) };
+                schedule: boardScheduleFrom() };
             if (editingNew) {
                 const id = slug(name) + '-' + Date.now().toString(36).slice(-4);
                 SETTINGS.vestaboard.boards.push(Object.assign({ id: id }, fields));
@@ -858,8 +905,11 @@ SIMULATOR_TEMPLATE = """
             document.getElementById('deWebhook').value = d.webhook_url || '';
             document.getElementById('deRoute').value = d.route || '';
             populateDirSelect(document.getElementById('deDir'), d.route || '', d.direction || '');
-            document.getElementById('deSchedEnabled').checked = !!(d.schedule && d.schedule.enabled);
-            document.getElementById('deSchedInterval').value = (d.schedule && d.schedule.interval_min) || 15;
+            var ds = d.schedule || {};
+            document.getElementById('deSchedEnabled').checked = !!ds.enabled;
+            document.getElementById('deSchedMode').value = ds.mode || 'aligned';
+            document.getElementById('deSchedInterval').value = ds.interval_min || 15;
+            onDeSchedMode();
             document.getElementById('deDeleteBtn').style.display = '';
             document.getElementById('deviceEditor').style.display = '';
             renderTargetStatus('deStatus', 'trmnl', d.id);
@@ -872,7 +922,9 @@ SIMULATOR_TEMPLATE = """
             document.getElementById('deRoute').value = '';
             populateDirSelect(document.getElementById('deDir'), '', '');
             document.getElementById('deSchedEnabled').checked = false;
+            document.getElementById('deSchedMode').value = 'aligned';
             document.getElementById('deSchedInterval').value = 15;
+            onDeSchedMode();
             document.getElementById('deStatus').textContent = '';
             document.getElementById('deDeleteBtn').style.display = 'none';
             document.getElementById('deviceEditor').style.display = '';
@@ -889,7 +941,7 @@ SIMULATOR_TEMPLATE = """
         async function saveDevice() {
             const name = val('deName') || 'TRMNL';
             const fields = { name: name, webhook_url: val('deWebhook'), route: val('deRoute'),
-                direction: val('deDir'), schedule: scheduleFrom('deSchedEnabled', 'deSchedInterval', 5) };
+                direction: val('deDir'), schedule: deviceScheduleFrom() };
             if (editingNewDevice) {
                 const id = slug(name) + '-' + Date.now().toString(36).slice(-4);
                 SETTINGS.trmnl.devices.push(Object.assign({ id: id }, fields));
@@ -1033,6 +1085,11 @@ SIMULATOR_TEMPLATE = """
             if (!confirm('Push live ferry status to ' + target + '? This changes the physical display.')) return;
             vestaRequest(true);
         }
+
+        // ---- auto-preview with real data (debounced; cached WSDOT data keeps it cheap) ----
+        let trmnlPrevTimer = null, vestaPrevTimer = null;
+        function previewTrmnlSoon() { clearTimeout(trmnlPrevTimer); trmnlPrevTimer = setTimeout(fetchTrmnl, 300); }
+        function previewVestaSoon() { clearTimeout(vestaPrevTimer); vestaPrevTimer = setTimeout(previewVesta, 300); }
 
         // ---- init ----
         bindSync();
@@ -1211,13 +1268,15 @@ def parse_wsdot_date(date_str: Optional[str]) -> Optional[datetime]:
     return None
 
 
-def fetch_ferry_status(route_id: Optional[str] = None, api_key: Optional[str] = None) -> Dict[str, Any]:
+def fetch_ferry_status(route_id: Optional[str] = None, api_key: Optional[str] = None,
+                       use_cache: bool = True) -> Dict[str, Any]:
     """
-    Fetch ferry status from WSDOT API.
+    Fetch ferry status from WSDOT API, cached for WSDOT_CACHE_SECONDS.
 
     Args:
         route_id: Optional specific route ID to fetch
         api_key: Optional WSDOT API key override (falls back to WSDOT_API_KEY)
+        use_cache: Serve a recent cached result if available (default True)
 
     Returns:
         Dictionary containing ferry status data
@@ -1229,6 +1288,14 @@ def fetch_ferry_status(route_id: Optional[str] = None, api_key: Optional[str] = 
 
     route = route_id or FERRY_ROUTE_ID
     params = {"apiaccesscode": effective_key}
+
+    # Serve fresh-enough cached data so we hit WSDOT at most ~once / TTL per route.
+    cache_key = (route, effective_key)
+    if use_cache and WSDOT_CACHE_SECONDS > 0:
+        with _ferry_cache_lock:
+            hit = _ferry_cache.get(cache_key)
+        if hit and (time.time() - hit[0]) < WSDOT_CACHE_SECONDS:
+            return hit[1]
 
     try:
         # Fetch vessel locations
@@ -1314,7 +1381,7 @@ def fetch_ferry_status(route_id: Optional[str] = None, api_key: Optional[str] = 
         except Exception as e:
             logger.warning(f"Could not fetch alerts: {e}")
 
-        return {
+        result = {
             "vessels": vessels_data,
             "route_id": route,
             "route_name": ROUTE_NAMES.get(route, "Washington State Ferries") if route else "All Routes",
@@ -1323,6 +1390,10 @@ def fetch_ferry_status(route_id: Optional[str] = None, api_key: Optional[str] = 
             "alerts": alerts,
             "timestamp": datetime.now().isoformat()
         }
+        if WSDOT_CACHE_SECONDS > 0:
+            with _ferry_cache_lock:
+                _ferry_cache[cache_key] = (time.time(), result)
+        return result
 
     except requests.exceptions.RequestException as e:
         logger.error(f"Error fetching ferry data: {e}")
@@ -1741,14 +1812,37 @@ def _unique_id(raw: Any, name: str, seen: set) -> str:
 
 
 def _normalize_schedule(sched: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Coerce a target schedule to {enabled, interval_min}."""
+    """
+    Coerce a target schedule to its canonical shape.
+
+    mode:
+      'interval' — push every interval_min minutes
+      'aligned'  — push at wall-clock minute align_offset within each
+                   align_period (e.g. minute 13 of every 15) — good for TRMNL,
+                   whose device refreshes on a ~15-minute cycle
+      'smart'    — push when a vessel newly docks, when drive-up spaces change by
+                   > spaces_pct of capacity, or when interval_min elapses
+    """
     sched = sched or {}
-    try:
-        interval = int(sched.get('interval_min', 30))
-    except (ValueError, TypeError):
-        interval = 30
-    interval = max(1, min(interval, 1440))
-    return {'enabled': bool(sched.get('enabled', False)), 'interval_min': interval}
+
+    def _int(key, default, lo, hi):
+        try:
+            v = int(sched.get(key, default))
+        except (ValueError, TypeError):
+            v = default
+        return max(lo, min(v, hi))
+
+    mode = str(sched.get('mode', 'interval')).strip().lower()
+    if mode not in ('interval', 'aligned', 'smart'):
+        mode = 'interval'
+    return {
+        'enabled': bool(sched.get('enabled', False)),
+        'mode': mode,
+        'interval_min': _int('interval_min', 30, 1, 1440),
+        'spaces_pct': _int('spaces_pct', 25, 1, 100),
+        'align_period_min': _int('align_period_min', 15, 1, 120),
+        'align_offset_min': _int('align_offset_min', 13, 0, 119),
+    }
 
 
 def _normalize_settings(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -2244,40 +2338,129 @@ def _record_push(kind: str, target_id: str, result: Dict[str, Any]) -> None:
     _save_state(state)
 
 
-def _target_due(kind: str, target_id: str, interval_min: int, state: Dict[str, Any]) -> bool:
-    """True if this target has never pushed or its interval has elapsed."""
-    entry = state.get(kind, {}).get(target_id)
-    floor = max(interval_min, TRMNL_MIN_INTERVAL_MIN if kind == 'trmnl' else 1)
-    if not entry or not entry.get("last_push"):
-        return True
+def _parse_iso(value: Optional[str]) -> Optional[datetime]:
     try:
-        last = datetime.fromisoformat(entry["last_push"])
+        return datetime.fromisoformat(value) if value else None
     except (ValueError, TypeError):
+        return None
+
+
+def _interval_due(entry: Dict[str, Any], interval_min: int, floor: int, now: datetime) -> bool:
+    last = _parse_iso(entry.get("last_push"))
+    if not last:
         return True
-    return datetime.now() >= last + timedelta(minutes=floor)
+    return now >= last + timedelta(minutes=max(interval_min, floor))
+
+
+def _aligned_due(sched: Dict[str, Any], entry: Dict[str, Any], now: datetime) -> bool:
+    """Fire once per align_period when the wall-clock minute hits align_offset."""
+    period = max(1, sched.get("align_period_min", 15))
+    offset = sched.get("align_offset_min", 13) % period
+    if now.minute % period != offset:
+        return False
+    last = _parse_iso(entry.get("last_push"))
+    # Only once per window (ticks fire every 30s, so guard the whole minute).
+    if last and (now - last) < timedelta(minutes=period - 1):
+        return False
+    return True
+
+
+def _docked_vessel_names(data: Dict[str, Any]) -> list:
+    """In-service vessels currently at a dock on this route."""
+    names = {v.get("VesselName") for v in data.get("vessels", [])
+             if v.get("AtDock") and v.get("InService") and v.get("VesselName")}
+    return sorted(names)
+
+
+def _smart_evaluate(board, sched, entry, data, status, now):
+    """
+    Decide whether a smart-mode Vestaboard should push, and refresh its
+    observed state. Returns (should_push, reasons, observed) where observed is
+    the metrics to persist. Triggers: a vessel newly docked, drive-up spaces
+    changed by > spaces_pct of capacity since last push, or interval elapsed.
+    """
+    interval = max(1, sched.get("interval_min", 15))
+    pct = max(1, sched.get("spaces_pct", 25)) / 100.0
+    last = _parse_iso(entry.get("last_push"))
+
+    cur_docked = _docked_vessel_names(data)
+    prev_docked = set(entry.get("observed_docked", []))
+    from_t = status.get("from") if status else None
+    cur_spaces = status.get("spaces") if status else None
+    cur_max = (data.get("terminal_spaces", {}).get(from_t) or {}).get("max") if from_t else None
+    pushed_spaces = entry.get("pushed_spaces")
+
+    reasons = []
+    if set(cur_docked) - prev_docked:
+        reasons.append("arrival")
+    if pushed_spaces is not None and cur_spaces is not None and cur_max:
+        if abs(cur_spaces - pushed_spaces) > pct * cur_max:
+            reasons.append("spaces")
+    if not last or (now - last) >= timedelta(minutes=interval):
+        reasons.append("time")
+
+    observed = {"docked": cur_docked, "spaces": cur_spaces, "max": cur_max}
+    return bool(reasons), reasons, observed
 
 
 def _scheduler_tick() -> None:
-    """One pass: push every enabled target whose interval has elapsed."""
+    """One pass: push every enabled target that is due per its schedule mode."""
     settings = load_settings()
     wsdot = settings.get("wsdot_key") or None
     state = _load_state()
+    now = datetime.now()
+    dirty = False
+
+    def _finish_push(entry, result):
+        entry["last_push"] = now.isoformat()
+        entry["ok"] = "error" not in result
+        entry["message"] = result.get("error") or result.get("status") or "sent"
 
     for board in settings["vestaboard"]["boards"]:
         sch = board.get("schedule") or {}
         if not sch.get("enabled") or not (board.get("key") or VESTABOARD_RW_KEY):
             continue
-        if _target_due("vestaboard", board["id"], sch.get("interval_min", 30), state):
-            logger.info(f"Scheduled push -> Vestaboard '{board['name']}'")
-            _record_push("vestaboard", board["id"], push_vestaboard_target(board, wsdot))
+        entry = state.setdefault("vestaboard", {}).setdefault(board["id"], {})
+        mode = sch.get("mode", "interval")
+        do_push, reasons, observed = False, [], None
+
+        if mode == "smart":
+            data = fetch_ferry_status(board.get("route") or None, api_key=wsdot)
+            status = compute_direction_status(data, board.get("route"), board.get("direction")) if board.get("route") else None
+            do_push, reasons, observed = _smart_evaluate(board, sch, entry, data, status, now)
+            if entry.get("observed_docked") != observed["docked"]:
+                entry["observed_docked"] = observed["docked"]
+                dirty = True
+        elif mode == "aligned":
+            do_push = _aligned_due(sch, entry, now)
+        else:
+            do_push = _interval_due(entry, sch.get("interval_min", 30), 1, now)
+
+        if do_push:
+            logger.info(f"Scheduled push -> Vestaboard '{board['name']}' ({mode}{': ' + ','.join(reasons) if reasons else ''})")
+            _finish_push(entry, push_vestaboard_target(board, wsdot))
+            if observed is not None:
+                entry["pushed_spaces"] = observed["spaces"]
+                entry["observed_docked"] = observed["docked"]
+            dirty = True
 
     for dev in settings["trmnl"]["devices"]:
         sch = dev.get("schedule") or {}
         if not sch.get("enabled") or not dev.get("webhook_url"):
             continue
-        if _target_due("trmnl", dev["id"], sch.get("interval_min", 15), state):
-            logger.info(f"Scheduled push -> TRMNL '{dev['name']}'")
-            _record_push("trmnl", dev["id"], push_trmnl_target(dev, wsdot))
+        entry = state.setdefault("trmnl", {}).setdefault(dev["id"], {})
+        mode = sch.get("mode", "aligned")
+        if mode == "aligned":
+            do_push = _aligned_due(sch, entry, now)
+        else:
+            do_push = _interval_due(entry, sch.get("interval_min", 15), TRMNL_MIN_INTERVAL_MIN, now)
+        if do_push:
+            logger.info(f"Scheduled push -> TRMNL '{dev['name']}' ({mode})")
+            _finish_push(entry, push_trmnl_target(dev, wsdot))
+            dirty = True
+
+    if dirty:
+        _save_state(state)
 
 
 def _scheduler_loop() -> None:

@@ -5,8 +5,19 @@ These tests verify basic functionality without requiring an actual API key.
 """
 
 import os
+import sys
 import json
+import pytest
 from unittest.mock import patch, MagicMock
+
+
+@pytest.fixture(autouse=True)
+def _clear_ferry_cache():
+    """Clear the WSDOT response cache between tests for determinism."""
+    m = sys.modules.get('app')
+    if m and hasattr(m, '_ferry_cache'):
+        m._ferry_cache.clear()
+    yield
 
 
 # Mock environment variables before importing app
@@ -367,6 +378,42 @@ def test_scheduler_pushes_due_targets(tmp_path):
         status = client.get('/api/schedule/status').get_json()
         assert status['vestaboard']['k']['ok'] is True
         assert status['trmnl']['o']['ok'] is True
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_aligned_schedule_minute_13_of_15():
+    import app
+    from datetime import datetime
+    sch = app._normalize_schedule({'enabled': True, 'mode': 'aligned', 'align_period_min': 15, 'align_offset_min': 13})
+    assert app._aligned_due(sch, {}, datetime(2026, 7, 6, 10, 13, 0)) is True
+    assert app._aligned_due(sch, {}, datetime(2026, 7, 6, 10, 14, 0)) is False
+    # once per window
+    just = {'last_push': datetime(2026, 7, 6, 10, 13, 0).isoformat()}
+    assert app._aligned_due(sch, just, datetime(2026, 7, 6, 10, 13, 30)) is False
+    assert app._aligned_due(sch, just, datetime(2026, 7, 6, 10, 28, 0)) is True
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_smart_schedule_triggers():
+    import app
+    from datetime import datetime, timedelta
+    sch = app._normalize_schedule({'enabled': True, 'mode': 'smart', 'interval_min': 15, 'spaces_pct': 25})
+    now = datetime(2026, 7, 6, 10, 0, 0)
+    data = {'vessels': [{'VesselName': 'Tacoma', 'AtDock': True, 'InService': True}],
+            'terminal_spaces': {'Seattle': {'max': 200, 'drive_up': 100}}}
+    status = {'from': 'Seattle', 'spaces': 100}
+    base = {'last_push': now.isoformat(), 'observed_docked': ['Tacoma'], 'pushed_spaces': 100}
+
+    assert app._smart_evaluate(None, sch, base, data, status, now + timedelta(minutes=5))[0] is False
+    # new vessel docks -> arrival
+    data2 = {'vessels': data['vessels'] + [{'VesselName': 'Wenatchee', 'AtDock': True, 'InService': True}],
+             'terminal_spaces': data['terminal_spaces']}
+    assert 'arrival' in app._smart_evaluate(None, sch, base, data2, status, now + timedelta(minutes=5))[1]
+    # >25% of 200 = >50 change
+    assert 'spaces' in app._smart_evaluate(None, sch, base, data, {'from': 'Seattle', 'spaces': 40}, now + timedelta(minutes=5))[1]
+    assert app._smart_evaluate(None, sch, base, data, {'from': 'Seattle', 'spaces': 80}, now + timedelta(minutes=5))[0] is False
+    # time trigger after interval
+    assert 'time' in app._smart_evaluate(None, sch, base, data, status, now + timedelta(minutes=16))[1]
 
 
 if __name__ == '__main__':

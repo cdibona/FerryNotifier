@@ -1,6 +1,45 @@
-# Installation Guide for FerryTrmnl
+# Installation Guide for FerryNotifier
 
-This guide provides step-by-step instructions for deploying FerryTrmnl on a production server.
+This guide provides step-by-step instructions for deploying FerryNotifier on a production server.
+
+## Quick start (Docker) + first-run setup
+
+The fastest path is the published container with a persistent volume:
+
+```bash
+docker run -d --name ferrynotifier -p 5050:5050 \
+  --env-file .env -v ferry-data:/app/data \
+  ghcr.io/cdibona/ferrynotifier:latest
+```
+
+Then open the **control panel** at `http://<host>:5050/` and:
+
+1. **WSDOT key** — if you didn't set `WSDOT_API_KEY` in `.env`, paste your key into
+   the "WSDOT API Key" field on either tab. ([Get one free](https://wsdot.wa.gov/traffic/api/).)
+   Everything you enter is saved server-side to the `ferry-data` volume and
+   survives restarts.
+2. **Add a Vestaboard** — on the Vestaboard tab, choose "Add new board", set its
+   name, model (**Flagship** 6×22 or **Note** 3×15), route, direction, and its
+   Read/Write key (from [web.vestaboard.com](https://web.vestaboard.com)). The
+   preview renders live. Turn on **Auto-push**; the default "on arrivals & space
+   changes" pushes when a ferry docks, when drive-up spaces move >25% of capacity,
+   or at least every 15 minutes.
+3. **Add a TRMNL device (optional push)** — TRMNL usually *polls* your server; to
+   have the server push, create a **Webhook** Private Plugin in your
+   [TRMNL dashboard](https://usetrmnl.com/), paste the four layouts from
+   `assets/trmnl-markup.liquid` into its Markup tabs, and copy the plugin's webhook
+   URL into a TRMNL target here. Enable **Auto-push** (aligned to minute 13 of the
+   15-minute refresh). For polling instead, point a Polling plugin at
+   `http://<host>:5050/api/trmnl?route_id=sea-bi&direction=Seattle`.
+4. **Verify** — the header shows "● Scheduler running" and each target shows its
+   last-push time. Use **Push now** to test immediately.
+
+Keep this server on a trusted network (e.g. a tailnet) — API keys are stored in
+plaintext in the volume. The rest of this guide covers a from-source deployment
+behind nginx.
+
+---
+
 
 ## Prerequisites
 
