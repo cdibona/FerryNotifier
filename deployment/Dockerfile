@@ -40,11 +40,14 @@ RUN useradd -m -u 1000 ferrytrmnl && \
     mkdir -p /app/data && \
     chown -R ferrytrmnl:ferrytrmnl /app
 
-# Persisted settings live here (mount a volume to keep them across restarts)
+# Persisted settings live here. Mount a volume at /app/data to keep them across
+# updates, e.g.  -v $HOME/.ferrynotifier:/app/data  (or use deployment/update.sh).
+# NOTE: intentionally NO `VOLUME` directive — it would create a throwaway
+# anonymous volume when run without -v, silently losing data on every update.
+# Without it, the app can detect the missing mount and warn at startup.
 ENV SETTINGS_PATH=/app/data/settings.json \
-    ENABLE_SCHEDULER=true
-
-VOLUME ["/app/data"]
+    ENABLE_SCHEDULER=true \
+    IN_DOCKER=1
 
 USER ferrytrmnl
 

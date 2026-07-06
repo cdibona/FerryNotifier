@@ -57,10 +57,9 @@ GITHUB_REPO_URL = os.getenv('GITHUB_REPO_URL', 'https://github.com/cdibona/Ferry
 
 # Persisted settings saved from the web UI (route, keys, Vestaboard targets).
 # Stored as a JSON file; mount a volume at this path to persist across restarts.
-SETTINGS_PATH = os.getenv(
-    'SETTINGS_PATH',
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'settings.json')
-)
+# `or` (not a getenv default) so an empty SETTINGS_PATH env doesn't blank the path.
+SETTINGS_PATH = os.getenv('SETTINGS_PATH') or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'data', 'settings.json')
 _settings_lock = threading.Lock()
 
 # WA State Ferries run on Pacific time; render times in that zone regardless of
@@ -2823,7 +2822,37 @@ def start_scheduler() -> None:
     logger.info("Push scheduler started (tick %ss)", SCHEDULER_TICK_SECONDS)
 
 
+def check_persistence() -> None:
+    """
+    Warn loudly if, inside a container, the settings directory is not a mounted
+    volume — because then saved targets/keys/schedules are lost on every update.
+    """
+    data_dir = os.path.dirname(SETTINGS_PATH) or '.'
+    in_docker = os.path.exists('/.dockerenv') or os.getenv('IN_DOCKER')
+    persistent = os.path.ismount(data_dir)
+    if in_docker and not persistent:
+        bar = "!" * 72
+        logger.warning(bar)
+        logger.warning("DATA IS NOT ON A PERSISTENT VOLUME: %s", data_dir)
+        logger.warning("Saved targets, keys and schedules will be LOST when this")
+        logger.warning("container is updated or recreated.")
+        logger.warning("Fix: run with a mounted volume, e.g.")
+        logger.warning("    -v $HOME/.ferrynotifier:/app/data")
+        logger.warning("or use deployment/update.sh / the compose files (they mount it).")
+        logger.warning(bar)
+    else:
+        try:
+            s = load_settings()
+            boards = len(s.get('vestaboard', {}).get('boards', []))
+            devices = len(s.get('trmnl', {}).get('devices', []))
+            logger.info("Settings at %s (persistent volume: %s) — %d board(s), %d TRMNL target(s).",
+                        SETTINGS_PATH, persistent, boards, devices)
+        except Exception:
+            pass
+
+
 # Start under gunicorn (which imports app:app) as well as `python app.py`.
+check_persistence()
 start_scheduler()
 
 

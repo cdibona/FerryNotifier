@@ -486,8 +486,8 @@ Build and run with Docker:
 # Build from project root
 docker build -f deployment/Dockerfile -t ferrytrmnl .
 
-# Run with a named volume so targets/keys/schedules persist across restarts
-docker run -p 5050:5050 --env-file .env -v ferry-data:/app/data ferrytrmnl
+# Run with a persistent data dir so targets/keys/schedules survive updates
+docker run -p 5050:5050 --env-file .env -v "$HOME/.ferrynotifier:/app/data" ferrytrmnl
 ```
 
 Or use docker-compose (mounts the `ferry-data` volume for you):
@@ -497,8 +497,30 @@ cd deployment
 docker-compose up -d
 ```
 
-The `-v ferry-data:/app/data` volume is what makes settings survive a restart —
-without it, saved targets and schedules are lost when the container is recreated.
+### ⚠️ Persistence: don't lose your settings on update
+
+All settings (targets, keys, schedules, capture history) live in `/app/data`.
+**You must bind-mount that to a host directory and reuse it every time you
+recreate the container** — otherwise a plain `docker run <newimage>` starts with
+an empty data directory and your settings are gone. The app prints a loud
+warning at startup if `/app/data` is not a mounted volume.
+
+The safe way to update is `deployment/update.sh`, which always re-mounts the
+same host directory (`$HOME/.ferrynotifier` by default):
+
+```bash
+./deployment/update.sh          # pulls latest, recreates the container, keeps data
+# override defaults if needed:
+FERRY_DATA=/opt/ferry-data FERRY_PORT=8080 ./deployment/update.sh
+```
+
+Or use Compose, which manages a named volume for you across updates:
+
+```bash
+cd deployment
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+```
 
 ### Pre-built Image from GHCR
 
@@ -520,7 +542,9 @@ echo "$GHCR_PAT" | docker login ghcr.io -u <github-username> --password-stdin
 Then run the published image directly:
 
 ```bash
-docker run -p 5050:5050 --env-file .env -v ferry-data:/app/data ghcr.io/cdibona/ferrynotifier:latest
+docker run -p 5050:5050 --env-file .env -v "$HOME/.ferrynotifier:/app/data" ghcr.io/cdibona/ferrynotifier:latest
+# ...and update later WITHOUT losing settings:
+./deployment/update.sh
 ```
 
 Or with Compose (pulls instead of building):

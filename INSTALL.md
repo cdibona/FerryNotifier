@@ -8,9 +8,15 @@ The fastest path is the published container with a persistent volume:
 
 ```bash
 docker run -d --name ferrynotifier -p 5050:5050 \
-  --env-file .env -v ferry-data:/app/data \
+  --env-file .env -v "$HOME/.ferrynotifier:/app/data" \
   ghcr.io/cdibona/ferrynotifier:latest
 ```
+
+**Important — persistence:** settings live in `/app/data`; the `-v` bind mount
+above keeps them on the host so they survive updates. When you update later, use
+`deployment/update.sh` (it re-mounts the same directory) — never a bare
+`docker run` of a new image, which would start with an empty data dir. The app
+logs a loud warning at startup if `/app/data` is not a mounted volume.
 
 Then open the **control panel** at `http://<host>:5050/` and:
 
