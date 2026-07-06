@@ -139,9 +139,21 @@ ferry status to your devices. It has two tabs:
 
 **Targets & scheduling.** Add each device as a target — a Vestaboard (name, model,
 route, direction, Read/Write key) or a TRMNL device (name, route, direction,
-webhook URL). Each target has its own **schedule** (auto-push every N minutes) and
-a **Push now** button. A background scheduler pushes every enabled target on its
-interval; the header shows whether it's running and each target's last-push status.
+webhook URL). Each target has its own **schedule** and a **Push now** button. A
+background scheduler pushes every enabled target on its interval; the header shows
+whether it's running and each target's last-push status.
+
+- **Vestaboard "smart" trigger** — pushes when a ferry newly docks, when drive-up
+  spaces change by more than a set % of capacity, or at least every N minutes.
+- **TRMNL "aligned" trigger** — pushes at minute 13 of the 15-minute cycle so fresh
+  data lands just before the device refreshes.
+
+**Quiet hours & sleep message.** Each Vestaboard can have **quiet hours** (e.g.
+22:00–06:00): during the window the server stops pushing ferry updates and shows a
+**pre-sleep message** once — either a line of text or a **captured layout**. Click
+**Read current board** to grab whatever is currently on the board (via the
+Read/Write API's read), which is saved to that board's capture **history**; pick any
+capture and "Use as sleep message".
 
 **Persistence.** All settings — WSDOT key, targets, keys, and schedules — are saved
 **on the server** as JSON (default `/app/data/settings.json`), so they survive

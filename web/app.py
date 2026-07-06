@@ -596,6 +596,29 @@ SIMULATOR_TEMPLATE = """
                             <input type="number" id="beSchedPct" min="1" max="100" value="25" style="width:56px">% of capacity</span>
                     </div>
                     <div class="form-row"><span class="target-status" id="beStatus" style="margin-left:0"></span></div>
+
+                    <div class="quiet-block" style="margin-top: 16px; border-top: 1px dashed #dfe3ee; padding-top: 14px;">
+                        <div class="form-row sched-row">
+                            <label class="sched-toggle"><input type="checkbox" id="beQuietEnabled"> Quiet hours</label>
+                            <span class="sched-int">from <input type="time" id="beQuietStart" value="22:00" style="width:120px">
+                                to <input type="time" id="beQuietEnd" value="06:00" style="width:120px"></span>
+                        </div>
+                        <div class="form-row" style="margin-top: 12px;">
+                            <div class="form-group wide">
+                                <label>Pre-sleep message
+                                    <span id="beSleepCapturedNote" style="display:none; color:#2e7d32; font-size:12px; font-weight:600">
+                                        &mdash; using a captured layout (<a href="#" onclick="clearSleepCapture(); return false;">use text instead</a>)</span>
+                                </label>
+                                <input type="text" id="beSleepText" placeholder="e.g. GOOD NIGHT — SEE YOU IN THE MORNING" maxlength="200">
+                            </div>
+                        </div>
+                        <div class="form-row" style="margin-top: 12px; align-items: center; gap: 12px;">
+                            <button class="btn btn-secondary" type="button" onclick="readBoard()">Read current board</button>
+                            <select id="beHistory" onchange="onHistorySelect()" style="width:auto; min-width:220px"></select>
+                            <button class="btn btn-secondary" type="button" id="beUseSleepBtn" onclick="useSnapshotAsSleep()" style="display:none">Use as sleep message</button>
+                        </div>
+                    </div>
+
                     <div class="form-row" style="margin-top: 15px;">
                         <button class="btn btn-secondary" onclick="saveBoard()">Save Board</button>
                         <button class="btn btn-primary" id="bePushNowBtn" onclick="pushBoardNow()">Push now</button>
@@ -793,10 +816,18 @@ SIMULATOR_TEMPLATE = """
             document.getElementById('beSchedInterval').value = bs.interval_min || 15;
             document.getElementById('beSchedPct').value = bs.spaces_pct || 25;
             onBeSchedMode();
+            var q = b.quiet || {};
+            document.getElementById('beQuietEnabled').checked = !!q.enabled;
+            document.getElementById('beQuietStart').value = q.start || '22:00';
+            document.getElementById('beQuietEnd').value = q.end || '06:00';
+            document.getElementById('beSleepText').value = q.sleep_text || '';
+            editorSleepChars = q.sleep_characters || null;
+            updateSleepCapturedNote();
             document.getElementById('beDeleteBtn').style.display = '';
             document.getElementById('boardEditor').style.display = '';
             setVbLabel(b.model || 'flagship');
             renderTargetStatus('beStatus', 'vestaboard', b.id);
+            loadHistory(b.id);
         }
         function showEditorBlank() {
             editingNew = true;
@@ -812,12 +843,84 @@ SIMULATOR_TEMPLATE = """
             document.getElementById('beSchedInterval').value = 15;
             document.getElementById('beSchedPct').value = 25;
             onBeSchedMode();
+            document.getElementById('beQuietEnabled').checked = false;
+            document.getElementById('beQuietStart').value = '22:00';
+            document.getElementById('beQuietEnd').value = '06:00';
+            document.getElementById('beSleepText').value = '';
+            editorSleepChars = null;
+            updateSleepCapturedNote();
+            document.getElementById('beHistory').innerHTML = '';
+            document.getElementById('beUseSleepBtn').style.display = 'none';
             document.getElementById('beStatus').textContent = '';
             document.getElementById('beDeleteBtn').style.display = 'none';
             document.getElementById('boardEditor').style.display = '';
             setVbLabel('flagship');
         }
         function hideEditor() { document.getElementById('boardEditor').style.display = 'none'; }
+
+        // ---- quiet hours + sleep + history ----
+        let editorSleepChars = null;   // captured layout chosen as the sleep message
+        let selectedSnapshot = null;   // snapshot currently previewed from history
+        function boardQuietFrom() {
+            return {
+                enabled: document.getElementById('beQuietEnabled').checked,
+                start: val('beQuietStart') || '22:00',
+                end: val('beQuietEnd') || '06:00',
+                sleep_text: val('beSleepText'),
+                sleep_characters: editorSleepChars || null,
+            };
+        }
+        function updateSleepCapturedNote() {
+            document.getElementById('beSleepCapturedNote').style.display = editorSleepChars ? '' : 'none';
+        }
+        function clearSleepCapture() { editorSleepChars = null; updateSleepCapturedNote(); }
+        async function readBoard() {
+            const id = SETTINGS.vestaboard.selected;
+            if (!id) { setStatus('vbDot', 'vbStatus', 'vbTime', 'error', 'Save the board first'); return; }
+            setStatus('vbDot', 'vbStatus', 'vbTime', 'loading', 'Reading board…');
+            try {
+                const r = await fetch(siteBase() + '/api/vestaboard/read', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ board_id: id })
+                });
+                const d = await r.json();
+                if (d.error) { setStatus('vbDot', 'vbStatus', 'vbTime', 'error', d.error); return; }
+                renderVestaGrid(d.characters);
+                setStatus('vbDot', 'vbStatus', 'vbTime', 'success', 'Read current board (captured)');
+                loadHistory(id);
+            } catch (e) { setStatus('vbDot', 'vbStatus', 'vbTime', 'error', 'Error: ' + e.message); }
+        }
+        async function loadHistory(id) {
+            const sel = document.getElementById('beHistory');
+            sel.innerHTML = '<option value="">Captured history…</option>';
+            document.getElementById('beUseSleepBtn').style.display = 'none';
+            try {
+                const r = await fetch(siteBase() + '/api/vestaboard/history/' + encodeURIComponent(id));
+                const d = await r.json();
+                (d.history || []).forEach(function (h, i) {
+                    const e = document.createElement('option');
+                    e.value = String(i);
+                    const when = new Date(h.ts).toLocaleString();
+                    e.textContent = when + ' (' + h.rows + '×' + h.cols + ', ' + h.source + ')';
+                    sel.appendChild(e);
+                });
+                sel._history = d.history || [];
+            } catch (e) { /* ignore */ }
+        }
+        function onHistorySelect() {
+            const sel = document.getElementById('beHistory');
+            const idx = sel.value;
+            if (idx === '' || !sel._history) { document.getElementById('beUseSleepBtn').style.display = 'none'; return; }
+            selectedSnapshot = sel._history[parseInt(idx, 10)].characters;
+            renderVestaGrid(selectedSnapshot);
+            document.getElementById('beUseSleepBtn').style.display = '';
+            setStatus('vbDot', 'vbStatus', 'vbTime', 'success', 'Previewing captured layout');
+        }
+        function useSnapshotAsSleep() {
+            if (!selectedSnapshot) return;
+            editorSleepChars = selectedSnapshot;
+            updateSleepCapturedNote();
+            setStatus('vbDot', 'vbStatus', 'vbTime', 'success', 'Set captured layout as sleep message — Save Board to keep');
+        }
         function currentBoardConfig() {
             // Values from the open editor (covers unsaved edits), else the selected board.
             if (document.getElementById('boardEditor').style.display !== 'none') {
@@ -863,7 +966,7 @@ SIMULATOR_TEMPLATE = """
             const name = val('beName') || 'Board';
             const fields = { name: name, model: val('beModel') || 'flagship', route: val('beRoute'),
                 direction: val('beDir'), key: val('beKey'), url: val('beUrl'),
-                schedule: boardScheduleFrom() };
+                schedule: boardScheduleFrom(), quiet: boardQuietFrom() };
             if (editingNew) {
                 const id = slug(name) + '-' + Date.now().toString(36).slice(-4);
                 SETTINGS.vestaboard.boards.push(Object.assign({ id: id }, fields));
@@ -1735,6 +1838,73 @@ def send_to_vestaboard(characters: list, key: Optional[str] = None,
         return {"error": f"Failed to send to Vestaboard: {str(e)}"}
 
 
+def read_from_vestaboard(key: Optional[str] = None, url: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Read the current message from a Vestaboard via the Read/Write API (GET).
+    Returns {characters, appeared, id} or {error}.
+    """
+    rw_key = key or VESTABOARD_RW_KEY
+    rw_url = url or VESTABOARD_RW_URL
+    if not rw_key:
+        return {"error": "Vestaboard Read/Write key not configured"}
+    try:
+        resp = requests.get(rw_url, headers={"X-Vestaboard-Read-Write-Key": rw_key}, timeout=10)
+        resp.raise_for_status()
+        cm = (resp.json() or {}).get("currentMessage") or {}
+        layout = cm.get("layout")
+        characters = json.loads(layout) if isinstance(layout, str) else layout
+        if not characters:
+            return {"error": "Board returned no message"}
+        return {"status": "read", "characters": characters,
+                "appeared": cm.get("appeared"), "id": cm.get("id")}
+    except (requests.exceptions.RequestException, ValueError) as e:
+        logger.error(f"Failed to read Vestaboard: {e}")
+        return {"error": f"Failed to read Vestaboard: {str(e)}"}
+
+
+# --- Vestaboard capture history ---------------------------------------------
+
+HISTORY_DIR = os.path.join(os.path.dirname(SETTINGS_PATH), 'history')
+HISTORY_LIMIT = 30
+_history_lock = threading.Lock()
+
+
+def _history_path(board_id: str) -> str:
+    return os.path.join(HISTORY_DIR, f"{_slugify(board_id)}.json")
+
+
+def load_history(board_id: str) -> list:
+    try:
+        with open(_history_path(board_id)) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return []
+
+
+def add_history(board_id: str, characters: list, source: str = "read") -> list:
+    """Prepend a captured snapshot (newest first), capped at HISTORY_LIMIT."""
+    with _history_lock:
+        history = load_history(board_id)
+        snapshot = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "source": source,
+            "rows": len(characters),
+            "cols": len(characters[0]) if characters else 0,
+            "characters": characters,
+        }
+        history = [snapshot] + history
+        history = history[:HISTORY_LIMIT]
+        try:
+            os.makedirs(HISTORY_DIR, exist_ok=True)
+            tmp = _history_path(board_id) + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(history, f)
+            os.replace(tmp, _history_path(board_id))
+        except OSError as e:
+            logger.warning(f"Could not save board history: {e}")
+        return history
+
+
 # --- TRMNL webhook push -----------------------------------------------------
 
 def ferry_merge_variables(route: Optional[str], direction: Optional[str],
@@ -1784,6 +1954,30 @@ def push_vestaboard_target(board: Dict[str, Any], wsdot_key: Optional[str] = Non
     status = compute_direction_status(data, route, board.get("direction")) if route else None
     formatted = format_ferry_data(data)
     characters = format_vestaboard_message(formatted, status, model=board.get("model", "flagship"))
+    return send_to_vestaboard(characters, key=board.get("key") or None, url=board.get("url") or None)
+
+
+def format_sleep_text(text: str, model: str = "flagship") -> list:
+    """Center a short sleep message on the board grid for the given model."""
+    rows_n, cols_n = vb_dimensions(model)
+    lines = _wrap_center_rows(text or "GOOD NIGHT", rows_n, cols=cols_n)
+    top = max(0, (rows_n - len(lines)) // 2)
+    grid = [[0] * cols_n for _ in range(top)] + lines
+    while len(grid) < rows_n:
+        grid.append([0] * cols_n)
+    return grid[:rows_n]
+
+
+def push_sleep_message(board: Dict[str, Any]) -> Dict[str, Any]:
+    """Push a board's pre-sleep content: a captured layout if set, else its text."""
+    quiet = board.get("quiet") or {}
+    model = board.get("model", "flagship")
+    rows_n, cols_n = vb_dimensions(model)
+    chars = quiet.get("sleep_characters")
+    if isinstance(chars, list) and len(chars) == rows_n and all(len(r) == cols_n for r in chars):
+        characters = chars
+    else:
+        characters = format_sleep_text(quiet.get("sleep_text") or "GOOD NIGHT", model)
     return send_to_vestaboard(characters, key=board.get("key") or None, url=board.get("url") or None)
 
 
@@ -1866,6 +2060,30 @@ def _normalize_schedule(sched: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _normalize_hhmm(value: Any, default: str) -> str:
+    v = str(value or '').strip()
+    m = re.match(r'^(\d{1,2}):(\d{2})$', v)
+    if not m:
+        return default
+    h, mn = max(0, min(23, int(m.group(1)))), max(0, min(59, int(m.group(2))))
+    return f'{h:02d}:{mn:02d}'
+
+
+def _normalize_quiet(q: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Coerce a board's quiet-hours config to {enabled,start,end,sleep_text,sleep_characters}."""
+    q = q or {}
+    chars = q.get('sleep_characters')
+    if not (isinstance(chars, list) and chars and all(isinstance(r, list) for r in chars)):
+        chars = None
+    return {
+        'enabled': bool(q.get('enabled', False)),
+        'start': _normalize_hhmm(q.get('start'), '22:00'),
+        'end': _normalize_hhmm(q.get('end'), '06:00'),
+        'sleep_text': str(q.get('sleep_text') or '').strip()[:200],
+        'sleep_characters': chars,
+    }
+
+
 def _normalize_settings(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Coerce arbitrary input into the canonical settings shape."""
     data = data or {}
@@ -1891,6 +2109,7 @@ def _normalize_settings(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             'route': str(entry.get('route') or '').strip(),
             'direction': str(entry.get('direction') or '').strip(),
             'schedule': _normalize_schedule(entry.get('schedule')),
+            'quiet': _normalize_quiet(entry.get('quiet')),
         })
     vb_selected = str(vb.get('selected') or '').strip()
     if vb_selected and vb_selected not in seen_b:
@@ -2023,6 +2242,8 @@ def api_info():
             "/api/settings": "Read/write persisted settings & targets (GET/POST)",
             "/api/push/<kind>/<id>": "Push a saved target now (POST)",
             "/api/schedule/status": "Scheduler + last-push status (GET)",
+            "/api/vestaboard/read": "Read a board's current message + capture it (POST)",
+            "/api/vestaboard/history/<id>": "Captured snapshots for a board (GET)",
             "/api/info": "API information (GET)",
             "/health": "Health check endpoint"
         },
@@ -2091,6 +2312,36 @@ def api_push(kind, target_id):
 
     _record_push(kind, target_id, result)
     return jsonify(result), (200 if "error" not in result else 502)
+
+
+def _resolve_board_key(board_id: str):
+    """Return (key, url) for a saved board (or env fallback)."""
+    for b in load_settings()['vestaboard']['boards']:
+        if b['id'] == board_id:
+            return b.get('key') or None, b.get('url') or None
+    return None, None
+
+
+@app.route('/api/vestaboard/read', methods=['POST'])
+def api_vestaboard_read():
+    """Read the current message from a board and capture it to that board's history."""
+    board_id = _param('board_id')
+    vb_key = _param('vestaboard_key') or None
+    vb_url = _param('vestaboard_url') or None
+    if board_id and not vb_key:
+        vb_key, url = _resolve_board_key(board_id)
+        vb_url = vb_url or url
+
+    result = read_from_vestaboard(vb_key, vb_url)
+    if "error" not in result and board_id:
+        add_history(board_id, result["characters"], source="read")
+    return jsonify(result), (200 if "error" not in result else 502)
+
+
+@app.route('/api/vestaboard/history/<board_id>', methods=['GET'])
+def api_vestaboard_history(board_id):
+    """Return captured snapshots for a board (newest first)."""
+    return jsonify({"history": load_history(board_id)})
 
 
 @app.route('/webhook', methods=['GET'])
@@ -2390,6 +2641,23 @@ def _aligned_due(sched: Dict[str, Any], entry: Dict[str, Any], now: datetime) ->
     return True
 
 
+def _in_quiet_hours(quiet: Dict[str, Any], now_pacific: datetime) -> bool:
+    """True if the ferry-timezone wall clock is within the board's quiet window."""
+    if not quiet or not quiet.get("enabled"):
+        return False
+    start = _normalize_hhmm(quiet.get("start"), "22:00")
+    end = _normalize_hhmm(quiet.get("end"), "06:00")
+    sh, sm = (int(x) for x in start.split(":"))
+    eh, em = (int(x) for x in end.split(":"))
+    start_min, end_min = sh * 60 + sm, eh * 60 + em
+    if start_min == end_min:
+        return False
+    cur = now_pacific.hour * 60 + now_pacific.minute
+    if start_min < end_min:
+        return start_min <= cur < end_min
+    return cur >= start_min or cur < end_min  # overnight wrap
+
+
 def _docked_vessel_names(data: Dict[str, Any]) -> list:
     """In-service vessels currently at a dock on this route."""
     names = {v.get("VesselName") for v in data.get("vessels", [])
@@ -2443,9 +2711,35 @@ def _scheduler_tick() -> None:
 
     for board in settings["vestaboard"]["boards"]:
         sch = board.get("schedule") or {}
-        if not sch.get("enabled") or not (board.get("key") or VESTABOARD_RW_KEY):
+        quiet = board.get("quiet") or {}
+        if not (board.get("key") or VESTABOARD_RW_KEY):
+            continue
+        # A board is managed if it auto-pushes or has quiet hours.
+        if not sch.get("enabled") and not quiet.get("enabled"):
             continue
         entry = state.setdefault("vestaboard", {}).setdefault(board["id"], {})
+
+        # Quiet hours: during the window, suppress ferry pushes and show the
+        # sleep message once on entry; on exit, force a fresh update.
+        is_quiet = _in_quiet_hours(quiet, _now())
+        was_quiet = bool(entry.get("quiet_active"))
+        force_wake = False
+        if is_quiet:
+            if not was_quiet:
+                logger.info(f"Quiet hours begin -> sleep message on '{board['name']}'")
+                _finish_push(entry, push_sleep_message(board))
+                entry["quiet_active"] = True
+                dirty = True
+            continue
+        if was_quiet:
+            entry["quiet_active"] = False
+            force_wake = True
+            dirty = True
+
+        # Quiet-only board (no ferry auto-push): nothing more to do while awake.
+        if not sch.get("enabled"):
+            continue
+
         mode = sch.get("mode", "interval")
         do_push, reasons, observed = False, [], None
 
@@ -2460,6 +2754,10 @@ def _scheduler_tick() -> None:
             do_push = _aligned_due(sch, entry, now)
         else:
             do_push = _interval_due(entry, sch.get("interval_min", 30), 1, now)
+
+        if force_wake:
+            do_push = True
+            reasons = (reasons or []) + ["wake"]
 
         if do_push:
             logger.info(f"Scheduled push -> Vestaboard '{board['name']}' ({mode}{': ' + ','.join(reasons) if reasons else ''})")

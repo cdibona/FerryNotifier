@@ -417,6 +417,40 @@ def test_smart_schedule_triggers():
     assert 'time' in app._smart_evaluate(None, sch, base, data, status, now + timedelta(minutes=16))[1]
 
 
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_quiet_hours_window():
+    import app
+    from datetime import datetime
+    q = app._normalize_quiet({'enabled': True, 'start': '22:00', 'end': '06:00'})
+    assert app._in_quiet_hours(q, datetime(2026, 7, 6, 23, 0)) is True   # overnight
+    assert app._in_quiet_hours(q, datetime(2026, 7, 6, 5, 0)) is True
+    assert app._in_quiet_hours(q, datetime(2026, 7, 6, 14, 0)) is False
+    # disabled -> never quiet
+    q2 = app._normalize_quiet({'enabled': False, 'start': '22:00', 'end': '06:00'})
+    assert app._in_quiet_hours(q2, datetime(2026, 7, 6, 23, 0)) is False
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_scheduler_quiet_pushes_sleep_then_suppresses(tmp_path):
+    import app
+    from datetime import datetime
+    with patch.object(app, 'SETTINGS_PATH', str(tmp_path / 's.json')), \
+         patch.object(app, 'SCHEDULE_STATE_PATH', str(tmp_path / 'st.json')):
+        client = app.app.test_client()
+        client.post('/api/settings', json={'wsdot_key': 'wk', 'vestaboard': {'boards': [{
+            'name': 'Bed', 'model': 'note', 'route': 'sea-bi', 'direction': 'Seattle', 'key': 'k',
+            'schedule': {'enabled': True, 'mode': 'interval', 'interval_min': 15},
+            'quiet': {'enabled': True, 'start': '22:00', 'end': '06:00', 'sleep_text': 'NIGHT'}}]}})
+        with patch('app.push_sleep_message', return_value={'status': 'sent'}) as sleep_m, \
+             patch('app.push_vestaboard_target', return_value={'status': 'sent'}) as ferry_m:
+            with patch('app._now', return_value=datetime(2026, 7, 6, 23, 0, 0)):
+                app._scheduler_tick(); app._scheduler_tick()
+            assert sleep_m.call_count == 1 and ferry_m.call_count == 0
+            with patch('app._now', return_value=datetime(2026, 7, 6, 7, 0, 0)):
+                app._scheduler_tick()
+            assert ferry_m.call_count == 1  # wake push
+
+
 if __name__ == '__main__':
     print("Running basic tests...")
     
