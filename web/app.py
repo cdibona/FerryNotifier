@@ -978,6 +978,12 @@ SIMULATOR_TEMPLATE = """
         function showTab(name) {
             document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.dataset.tab === name); });
             document.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.toggle('active', p.dataset.tab === name); });
+            try { localStorage.setItem('ferrytab', name); } catch (e) {}
+        }
+        function restoreTab() {
+            var t;
+            try { t = localStorage.getItem('ferrytab'); } catch (e) {}
+            if (t === 'trmnl' || t === 'vestaboard') showTab(t);
         }
         function setStatus(dotId, textId, timeId, state, text, ms) {
             document.getElementById(dotId).className = 'status-dot ' + (state || '');
@@ -1034,8 +1040,9 @@ SIMULATOR_TEMPLATE = """
             document.getElementById('beQuietEnabled').checked = !!q.enabled;
             document.getElementById('beQuietStart').value = q.start || '22:00';
             document.getElementById('beQuietEnd').value = q.end || '06:00';
-            document.getElementById('beSleepText').value = q.sleep_text || '';
             editorSleepChars = q.sleep_characters || null;
+            // Show the chosen sleep content: saved text, or the decoded captured layout.
+            document.getElementById('beSleepText').value = q.sleep_text || (editorSleepChars ? charsToText(editorSleepChars) : '');
             updateSleepCapturedNote();
             document.getElementById('beDeleteBtn').style.display = '';
             document.getElementById('boardEditor').style.display = '';
@@ -1452,6 +1459,7 @@ SIMULATOR_TEMPLATE = """
         }
 
         // ---- init ----
+        restoreTab();
         bindSync();
         loadSettings();
         setInterval(loadScheduleStatus, 30000);
@@ -1958,16 +1966,21 @@ def _format_vestaboard_note(data, status, cols) -> list:
         rows.append(_vb_row(center="FERRY", cols=cols))
         rows += _wrap_center_rows(data["error"], NOTE_ROWS - 1, cols=cols)
     elif status is not None:
-        # Row 1: direction + time, using 3-letter terminal codes to fit 15 cells.
-        frm = status.get("from_short", "")[:3]
-        to = status.get("to_short", "")[:3]
+        # Row 1: direction + time. Use the full terminal codes (e.g. BAIN) when
+        # they fit the 15 cells, falling back to 3-letter codes if too long.
+        frm = status.get("from_short", "")
+        to = status.get("to_short", "")
         when = _fmt_time_short(_departure_time_obj(status))
-        rows.append(_vb_row(center=(f"{frm}-{to} {when}" if to else f"{frm} {when}"), cols=cols))
+        heading = f"{frm}-{to} {when}" if to else f"{frm} {when}"
+        if len(heading) > cols:
+            heading = f"{frm[:3]}-{to[:3]} {when}" if to else f"{frm[:3]} {when}"
+        rows.append(_vb_row(center=heading, cols=cols))
         # Row 2: spaces.
         sp = status.get("spaces")
         rows.append(_vb_row(center=f"SPACES: {sp if sp is not None else 'N/A'}", cols=cols))
-        # Row 3: delay indicator (no room for full text on a Note).
-        rows.append(_vb_row(center=("DELAYS" if status.get("delay") else "NO DELAYS"), cols=cols))
+        # Row 3: current 24h clock + delay indicator, e.g. "10:39 NO DELAYS".
+        clock = _now().strftime("%H:%M")
+        rows.append(_vb_row(center=f"{clock} {'DELAYED' if status.get('delay') else 'NO DELAYS'}", cols=cols))
     else:
         rows.append(_vb_row(center=data.get("route_name", "FERRIES")[:cols], cols=cols))
         rows.append(_vb_row(center="SET A ROUTE", cols=cols))
@@ -2016,12 +2029,13 @@ def format_vestaboard_message(data: Dict[str, Any],
         sp = status.get("spaces")
         rows.append(_vb_row(center=f"SPACES: {sp if sp is not None else 'N/A'}", cols=cols_n))
 
+        clock = _now().strftime("%H:%M")
         delay = status.get("delay")
         if delay:
-            rows.append(_vb_row(center="DELAYS:", cols=cols_n))
+            rows.append(_vb_row(center=f"{clock}  DELAYS:", cols=cols_n))
             rows += _wrap_center_rows(delay, rows_n - len(rows), cols=cols_n)
         else:
-            rows.append(_vb_row(center="NO DELAYS", cols=cols_n))
+            rows.append(_vb_row(center=f"{clock}  NO DELAYS", cols=cols_n))
     else:
         rows.append(_vb_row(center=data.get("route_name", "FERRIES"), cols=cols_n))
 
