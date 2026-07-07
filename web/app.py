@@ -271,6 +271,103 @@ TRMNL_TEMPLATE = """
 </html>
 """
 
+# TRMNL plugin markup (Liquid) for each layout — shown in the control panel so
+# users can copy/paste into a TRMNL private plugin's Markup editor. These are
+# passed to the page as template VARIABLES, so Jinja inserts them literally and
+# does not try to interpret the Liquid {{ }} / {% %} inside them.
+TRMNL_MK_FULL = """<div class="layout">
+  <div class="columns">
+    <div class="column">
+      <span class="title title--large">{{ route_name }}</span>
+
+      {% if status %}
+      <div class="content" style="margin-top: 10px;">
+        <span class="label">{{ status.from }}{% if status.to %} &rarr; {{ status.to }}{% endif %}</span>
+        <span class="value value--xxlarge">{{ status.time_str | default: '--' }}</span>
+        <span class="label label--small">Next scheduled departure</span>
+      </div>
+      <div class="content" style="margin-top: 8px;">
+        <span class="value value--large">{{ status.spaces | default: '--' }} <span class="label">drive-up spaces</span></span>
+      </div>
+      <div class="content" style="margin-top: 8px;">
+        {% if status.delay %}
+        <span class="label" style="border-left: 5px solid #000; padding-left: 8px;">&#9888; {{ status.delay }}</span>
+        {% else %}
+        <span class="label" style="border: 2px solid #000; padding: 2px 10px; display: inline-block;">No delays</span>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if vessels and vessels.size > 0 %}
+      <div class="content" style="margin-top: 10px;">
+        {% for vessel in vessels %}
+        <p style="margin: 2px 0;"><b>{{ vessel.name }}</b> &mdash; {{ vessel.status }}{% if vessel.location %} &middot; {{ vessel.location }}{% endif %}</p>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+<div class="title_bar">
+  <span class="title">FerryNotifier</span>
+  <span class="instance">{{ update_time }}</span>
+</div>"""
+
+TRMNL_MK_HALF_H = """<div class="layout">
+  <span class="title">{{ route_name }}</span>
+  {% if status %}
+  <div class="content" style="margin-top: 6px;">
+    <span class="value value--large">{{ status.from_short }}{% if status.to_short %} &rarr; {{ status.to_short }}{% endif %} {{ status.time_str | default: '--' }}</span>
+    <span class="label">{{ status.spaces | default: '--' }} spaces &middot; {% if status.delay %}{{ status.delay }}{% else %}No delays{% endif %}</span>
+  </div>
+  {% endif %}
+  {% for vessel in vessels %}
+  <span class="label label--small">{{ vessel.name }} - {{ vessel.status }}</span>
+  {% endfor %}
+</div>
+<div class="title_bar">
+  <span class="title">FerryNotifier</span>
+  <span class="instance">{{ update_time }}</span>
+</div>"""
+
+TRMNL_MK_HALF_V = """<div class="layout">
+  <div class="columns">
+    <div class="column">
+      <span class="title title--small">{{ route_name }}</span>
+      {% if status %}
+      <div class="content" style="margin-top: 6px;">
+        <span class="label">{{ status.from_short }}{% if status.to_short %} &rarr; {{ status.to_short }}{% endif %}</span>
+        <span class="value value--large">{{ status.time_str | default: '--' }}</span>
+        <span class="label label--small">{{ status.spaces | default: '--' }} spaces &middot; {% if status.delay %}Delays{% else %}No delays{% endif %}</span>
+      </div>
+      {% endif %}
+      {% for vessel in vessels %}
+      <span class="label label--small">{{ vessel.name }} - {{ vessel.status }}</span>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+<div class="title_bar">
+  <span class="title">FerryNotifier</span>
+  <span class="instance">{{ update_time }}</span>
+</div>"""
+
+TRMNL_MK_QUADRANT = """<div class="layout">
+  <div class="columns">
+    <div class="column">
+      <span class="label">{{ route_name }}</span>
+      {% if status %}
+      <span class="value value--large">{{ status.from_short }}{% if status.to_short %}&rarr;{{ status.to_short }}{% endif %} {{ status.time_str | default: '--' }}</span>
+      <span class="label label--small">{{ status.spaces | default: '--' }} spaces &middot; {% if status.delay %}Delays{% else %}No delays{% endif %}</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+<div class="title_bar">
+  <span class="title">Ferry</span>
+</div>"""
+
+
 # HTML template for webhook simulator frontend
 SIMULATOR_TEMPLATE = """
 <!DOCTYPE html>
@@ -331,6 +428,15 @@ SIMULATOR_TEMPLATE = """
         .target-status.ok { color: #2e7d32; }
         .target-status.bad { color: #c0392b; }
         .sched-banner { margin-top: 8px; font-size: 13px; opacity: 0.95; }
+        .setup-steps { font-size: 13px; color: #555; margin: 0 0 16px 18px; line-height: 1.6; }
+        .setup-steps code { background: #eef0f4; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+        .markup-blocks { display: flex; flex-direction: column; gap: 14px; }
+        .markup-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .markup-head span { font-size: 13px; font-weight: 600; color: #333; }
+        .markup-head .btn { padding: 6px 14px; font-size: 12px; }
+        .markup-ta { width: 100%; box-sizing: border-box; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px;
+            line-height: 1.4; border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; background: #fafbfc;
+            color: #222; resize: vertical; white-space: pre; }
         .webhook-url { background: #f8f9fa; border-radius: 8px; padding: 12px; margin-top: 15px; font-family: 'Monaco', 'Menlo', monospace; font-size: 13px; color: #666; word-break: break-all; }
         .webhook-url strong { color: #333; }
 
@@ -517,6 +623,42 @@ SIMULATOR_TEMPLATE = """
                         <button class="btn btn-secondary" onclick="saveDevice()">Save Device</button>
                         <button class="btn btn-primary" id="dePushNowBtn" onclick="pushDeviceNow()">Push now</button>
                         <button class="btn btn-ghost" id="deDeleteBtn" onclick="deleteDevice()">Delete</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="controls" style="margin-top: 20px;">
+                <h2>Add the FerryNotifier plugin to TRMNL</h2>
+                <p class="hint">Create a Private Plugin in your
+                    <a href="https://usetrmnl.com/" target="_blank" rel="noopener">TRMNL dashboard &#8599;</a>
+                    (needs the Developer perk), then paste the markup below into its layout tabs.</p>
+                <ol class="setup-steps">
+                    <li><strong>Plugins &rarr; Private Plugin</strong>, give it a name (e.g. "WA Ferry Status").</li>
+                    <li>Pick a <strong>strategy</strong>:
+                        <ul>
+                            <li><strong>Webhook</strong> (for a tailnet/private server like this one): copy the webhook URL TRMNL gives you, then add it as a <strong>TRMNL target</strong> in "Scheduled Push Targets" above — the server pushes to it.</li>
+                            <li><strong>Polling</strong> (needs a public server): set the Polling URL to <code>&lt;your-url&gt;/api/trmnl?route_id=sea-bi&amp;direction=Seattle</code>.</li>
+                        </ul>
+                    </li>
+                    <li>Click <strong>Edit Markup</strong> and paste each block below into its matching tab.</li>
+                    <li>Save, then add the plugin to a playlist on your device.</li>
+                </ol>
+                <div class="markup-blocks">
+                    <div class="markup-block">
+                        <div class="markup-head"><span>Full tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkFull', this)">Copy</button></div>
+                        <textarea id="mkFull" class="markup-ta" readonly rows="16">{{ markup_full }}</textarea>
+                    </div>
+                    <div class="markup-block">
+                        <div class="markup-head"><span>Half Horizontal tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkHalfH', this)">Copy</button></div>
+                        <textarea id="mkHalfH" class="markup-ta" readonly rows="9">{{ markup_half_h }}</textarea>
+                    </div>
+                    <div class="markup-block">
+                        <div class="markup-head"><span>Half Vertical tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkHalfV', this)">Copy</button></div>
+                        <textarea id="mkHalfV" class="markup-ta" readonly rows="11">{{ markup_half_v }}</textarea>
+                    </div>
+                    <div class="markup-block">
+                        <div class="markup-head"><span>Quadrant tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkQuadrant', this)">Copy</button></div>
+                        <textarea id="mkQuadrant" class="markup-ta" readonly rows="8">{{ markup_quadrant }}</textarea>
                     </div>
                 </div>
             </div>
@@ -1225,6 +1367,16 @@ SIMULATOR_TEMPLATE = """
         let trmnlPrevTimer = null, vestaPrevTimer = null;
         function previewTrmnlSoon() { clearTimeout(trmnlPrevTimer); trmnlPrevTimer = setTimeout(fetchTrmnl, 300); }
         function previewVestaSoon() { clearTimeout(vestaPrevTimer); vestaPrevTimer = setTimeout(previewVesta, 300); }
+
+        // ---- copy TRMNL markup ----
+        function copyMarkup(id, btn) {
+            const ta = document.getElementById(id);
+            ta.focus(); ta.select();
+            const ok = function () { const t = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(function () { btn.textContent = t; }, 1500); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(ta.value).then(ok, function () { try { document.execCommand('copy'); ok(); } catch (e) {} });
+            } else { try { document.execCommand('copy'); ok(); } catch (e) {} }
+        }
 
         // ---- init ----
         bindSync();
@@ -2241,6 +2393,10 @@ def index():
         app_version=APP_VERSION,
         git_sha=GIT_SHA,
         repo_url=GITHUB_REPO_URL,
+        markup_full=TRMNL_MK_FULL,
+        markup_half_h=TRMNL_MK_HALF_H,
+        markup_half_v=TRMNL_MK_HALF_V,
+        markup_quadrant=TRMNL_MK_QUADRANT,
     )
 
 
