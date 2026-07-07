@@ -262,7 +262,7 @@ TRMNL_TEMPLATE = """
                 {% endfor %}
             </div>
             <div class="update-time">
-                Updated {{ update_time }}
+                Updated {{ update_date }} &middot; {{ update_time }}
             </div>
         </div>
         {% endif %}
@@ -310,7 +310,7 @@ TRMNL_MK_FULL = """<div class="layout">
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
 </div>"""
 
 TRMNL_MK_HALF_H = """<div class="layout">
@@ -327,7 +327,7 @@ TRMNL_MK_HALF_H = """<div class="layout">
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
 </div>"""
 
 TRMNL_MK_HALF_V = """<div class="layout">
@@ -349,7 +349,7 @@ TRMNL_MK_HALF_V = """<div class="layout">
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
 </div>"""
 
 TRMNL_MK_QUADRANT = """<div class="layout">
@@ -406,7 +406,7 @@ TRMNL_MK_SHARED = """<div class="layout">
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
 </div>"""
 
 # Non-empty stub for each view tab (views can't be blank, but Shared does the work).
@@ -1781,13 +1781,15 @@ def format_ferry_data(data: Dict[str, Any]) -> Dict[str, Any]:
     if "error" in data:
         return {"error": data["error"]}
 
+    _n = _now()
     formatted = {
         "route_name": data.get("route_name", "Washington State Ferries"),
         "route_description": "",
         "vessels": [],
         "departures": [],
         "terminal_spaces": data.get("terminal_spaces", {}),
-        "update_time": _now().strftime("%I:%M %p").lstrip("0")
+        "update_time": _n.strftime("%I:%M %p").lstrip("0"),
+        "update_date": _n.strftime("%a, %b ") + str(_n.day),
     }
 
     # Process vessel data
@@ -2160,6 +2162,7 @@ def ferry_merge_variables(route: Optional[str], direction: Optional[str],
     return {
         "route_name": formatted.get("route_name"),
         "update_time": formatted.get("update_time"),
+        "update_date": formatted.get("update_date"),
         "status": status,
         "vessels": formatted.get("vessels", [])[:MAX_VESSELS_DISPLAY],
     }
@@ -2733,7 +2736,7 @@ TRMNL_PREVIEW_TEMPLATE = """
                 {% endif %}
             </div>
         </div>
-        <div class="foot"><span>FerryTrmnl</span><span>Updated {{ update_time }}</span></div>
+        <div class="foot"><span>FerryTrmnl</span><span>Updated {{ update_date }} &middot; {{ update_time }}</span></div>
     </div>
 </body>
 </html>

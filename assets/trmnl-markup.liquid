@@ -8,6 +8,7 @@
 # Available variables:
 #   route_name                         e.g. "Seattle / Bainbridge Island"
 #   update_time                        e.g. "3:15 PM"
+#   update_date                        e.g. "Mon, Jul 7"
 #   status                             null, or an object for the chosen direction:
 #     status.from / status.to          full terminal names
 #     status.time_str                  next scheduled departure, e.g. "11:30 AM"
@@ -54,7 +55,7 @@
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
 </div>
 
 
@@ -76,7 +77,7 @@
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
 </div>
 
 
@@ -103,7 +104,7 @@
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
 </div>
 
 
