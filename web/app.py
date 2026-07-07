@@ -310,7 +310,7 @@ TRMNL_MK_FULL = """<div class="layout">
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}{% if trmnl.device.percent_charged %} &middot; <span style="display:inline-flex;align-items:center;vertical-align:middle;"><span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:{{ trmnl.device.percent_charged | round }}%;"></span></span><span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span></span>{% endif %}</span>
 </div>"""
 
 TRMNL_MK_HALF_H = """<div class="layout">
@@ -327,7 +327,7 @@ TRMNL_MK_HALF_H = """<div class="layout">
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}{% if trmnl.device.percent_charged %} &middot; <span style="display:inline-flex;align-items:center;vertical-align:middle;"><span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:{{ trmnl.device.percent_charged | round }}%;"></span></span><span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span></span>{% endif %}</span>
 </div>"""
 
 TRMNL_MK_HALF_V = """<div class="layout">
@@ -349,7 +349,7 @@ TRMNL_MK_HALF_V = """<div class="layout">
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}{% if trmnl.device.percent_charged %} &middot; <span style="display:inline-flex;align-items:center;vertical-align:middle;"><span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:{{ trmnl.device.percent_charged | round }}%;"></span></span><span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span></span>{% endif %}</span>
 </div>"""
 
 TRMNL_MK_QUADRANT = """<div class="layout">
@@ -406,7 +406,7 @@ TRMNL_MK_SHARED = """<div class="layout">
 </div>
 <div class="title_bar">
   <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_date }} &middot; {{ update_time }}</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}{% if trmnl.device.percent_charged %} &middot; <span style="display:inline-flex;align-items:center;vertical-align:middle;"><span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:{{ trmnl.device.percent_charged | round }}%;"></span></span><span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span></span>{% endif %}</span>
 </div>"""
 
 # Non-empty stub for each view tab (views can't be blank, but Shared does the work).
@@ -2759,7 +2759,11 @@ TRMNL_PREVIEW_TEMPLATE = """
                 {% endif %}
             </div>
         </div>
-        <div class="foot"><span>FerryTrmnl</span><span>Updated {{ update_date }} &middot; {{ update_time }}</span></div>
+        <div class="foot"><span>FerryTrmnl</span><span style="display:inline-flex;align-items:center;gap:6px;">Updated {{ update_date }} &middot; {{ update_time }} &middot;
+            <span title="battery (sample)" style="display:inline-flex;align-items:center;">
+                <span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:78%;"></span></span>
+                <span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span>
+            </span></span></div>
     </div>
 </body>
 </html>
