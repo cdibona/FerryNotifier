@@ -1987,9 +1987,13 @@ def _format_vestaboard_note(data, status, cols) -> list:
         # Row 2: spaces.
         sp = status.get("spaces")
         rows.append(_vb_row(center=f"SPACES: {sp if sp is not None else 'N/A'}", cols=cols))
-        # Row 3: current 24h clock + delay indicator, e.g. "10:39 NO DELAYS".
+        # Row 3: delay status + current 24h clock, e.g. "NO DELAYS @12:20".
         clock = _now().strftime("%H:%M")
-        rows.append(_vb_row(center=f"{clock} {'DELAYED' if status.get('delay') else 'NO DELAYS'}", cols=cols))
+        word = "DELAYED" if status.get("delay") else "NO DELAYS"
+        line = f"{word} @{clock}"
+        if len(line) > cols:  # 15-col Note: drop the space so it fits
+            line = f"{word}@{clock}"
+        rows.append(_vb_row(center=line, cols=cols))
     else:
         rows.append(_vb_row(center=data.get("route_name", "FERRIES")[:cols], cols=cols))
         rows.append(_vb_row(center="SET A ROUTE", cols=cols))
@@ -2041,10 +2045,10 @@ def format_vestaboard_message(data: Dict[str, Any],
         clock = _now().strftime("%H:%M")
         delay = status.get("delay")
         if delay:
-            rows.append(_vb_row(center=f"{clock}  DELAYS:", cols=cols_n))
+            rows.append(_vb_row(center=f"DELAYED @{clock}", cols=cols_n))
             rows += _wrap_center_rows(delay, rows_n - len(rows), cols=cols_n)
         else:
-            rows.append(_vb_row(center=f"{clock}  NO DELAYS", cols=cols_n))
+            rows.append(_vb_row(center=f"NO DELAYS @{clock}", cols=cols_n))
     else:
         rows.append(_vb_row(center=data.get("route_name", "FERRIES"), cols=cols_n))
 
