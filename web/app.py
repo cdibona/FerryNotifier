@@ -1103,13 +1103,20 @@ SIMULATOR_TEMPLATE = """
             }).map(function (l) { return l.replace(/\s+/g, ' ').trim(); })
               .filter(function (l) { return l !== ''; }).join('  ');
         }
-        // Stage a captured layout as the sleep message AND show it in the text box.
+        // Stage a captured layout as the sleep message, show it, and (for an
+        // already-saved board) persist it right away so the choice sticks.
         function stageSleepCapture(chars, label) {
             editorSleepChars = chars;
             document.getElementById('beSleepText').value = charsToText(chars);
             updateSleepCapturedNote();
-            setStatus('vbDot', 'vbStatus', 'vbTime', 'success',
-                (label || 'Captured') + ' — set as sleep message. Save Board to keep.');
+            const b = boardById(SETTINGS.vestaboard.selected);
+            if (b && !editingNew) {
+                Object.assign(b, boardFieldsFromForm());   // includes the new sleep_characters
+                saveSettingsNow();
+                setStatus('vbDot', 'vbStatus', 'vbTime', 'success', (label || 'Captured') + ' — saved as sleep message');
+            } else {
+                setStatus('vbDot', 'vbStatus', 'vbTime', 'success', (label || 'Captured') + ' — set as sleep. Save Board to keep.');
+            }
         }
         // Typing in the sleep box means "use this text", not the captured layout.
         function onSleepTextEdit() { if (editorSleepChars) { editorSleepChars = null; updateSleepCapturedNote(); } }
@@ -1200,13 +1207,15 @@ SIMULATOR_TEMPLATE = """
         function onDeSchedMode() {
             document.getElementById('deIntWrap').style.display = (val('deSchedMode') === 'aligned') ? 'none' : '';
         }
-        async function saveBoard() {
-            const name = val('beName') || 'Board';
-            const fields = { name: name, model: val('beModel') || 'flagship', route: val('beRoute'),
+        function boardFieldsFromForm() {
+            return { name: val('beName') || 'Board', model: val('beModel') || 'flagship', route: val('beRoute'),
                 direction: val('beDir'), key: val('beKey'), url: val('beUrl'),
                 schedule: boardScheduleFrom(), quiet: boardQuietFrom() };
+        }
+        async function saveBoard() {
+            const fields = boardFieldsFromForm();
             if (editingNew) {
-                const id = slug(name) + '-' + Date.now().toString(36).slice(-4);
+                const id = slug(fields.name) + '-' + Date.now().toString(36).slice(-4);
                 SETTINGS.vestaboard.boards.push(Object.assign({ id: id }, fields));
                 SETTINGS.vestaboard.selected = id;
             } else {
