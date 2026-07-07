@@ -930,7 +930,8 @@ SIMULATOR_TEMPLATE = """
             selectedSnapshot = sel._history[parseInt(idx, 10)].characters;
             renderVestaGrid(selectedSnapshot);
             document.getElementById('beUseSleepBtn').style.display = '';
-            setStatus('vbDot', 'vbStatus', 'vbTime', 'success', 'Previewing captured layout');
+            // Selecting a capture immediately previews AND fills the sleep box.
+            stageSleepCapture(selectedSnapshot, 'Selected captured layout');
         }
         function useSnapshotAsSleep() {
             if (!selectedSnapshot) return;
