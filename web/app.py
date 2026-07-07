@@ -608,7 +608,7 @@ SIMULATOR_TEMPLATE = """
                                     <span id="beSleepCapturedNote" style="display:none; color:#2e7d32; font-size:12px; font-weight:600">
                                         &mdash; using a captured layout (<a href="#" onclick="clearSleepCapture(); return false;">use text instead</a>)</span>
                                 </label>
-                                <input type="text" id="beSleepText" placeholder="e.g. GOOD NIGHT — SEE YOU IN THE MORNING" maxlength="200">
+                                <input type="text" id="beSleepText" oninput="onSleepTextEdit()" placeholder="e.g. GOOD NIGHT — SEE YOU IN THE MORNING" maxlength="200">
                             </div>
                         </div>
                         <div class="form-row" style="margin-top: 12px; align-items: center; gap: 12px;">
@@ -873,6 +873,24 @@ SIMULATOR_TEMPLATE = """
             document.getElementById('beSleepCapturedNote').style.display = editorSleepChars ? '' : 'none';
         }
         function clearSleepCapture() { editorSleepChars = null; updateSleepCapturedNote(); }
+        // Decode a Vestaboard grid to readable text (rows joined, blanks trimmed).
+        function charsToText(chars) {
+            if (!chars) return '';
+            return chars.map(function (row) {
+                return row.map(function (c) { return VB_CODE_TO_CHAR[c] || ' '; }).join('');
+            }).map(function (l) { return l.replace(/\s+/g, ' ').trim(); })
+              .filter(function (l) { return l !== ''; }).join('  ');
+        }
+        // Stage a captured layout as the sleep message AND show it in the text box.
+        function stageSleepCapture(chars, label) {
+            editorSleepChars = chars;
+            document.getElementById('beSleepText').value = charsToText(chars);
+            updateSleepCapturedNote();
+            setStatus('vbDot', 'vbStatus', 'vbTime', 'success',
+                (label || 'Captured') + ' — set as sleep message. Save Board to keep.');
+        }
+        // Typing in the sleep box means "use this text", not the captured layout.
+        function onSleepTextEdit() { if (editorSleepChars) { editorSleepChars = null; updateSleepCapturedNote(); } }
         async function readBoard() {
             const id = SETTINGS.vestaboard.selected;
             if (!id) { setStatus('vbDot', 'vbStatus', 'vbTime', 'error', 'Save the board first'); return; }
@@ -884,7 +902,7 @@ SIMULATOR_TEMPLATE = """
                 const d = await r.json();
                 if (d.error) { setStatus('vbDot', 'vbStatus', 'vbTime', 'error', d.error); return; }
                 renderVestaGrid(d.characters);
-                setStatus('vbDot', 'vbStatus', 'vbTime', 'success', 'Read current board (captured)');
+                stageSleepCapture(d.characters, 'Read current board');
                 loadHistory(id);
             } catch (e) { setStatus('vbDot', 'vbStatus', 'vbTime', 'error', 'Error: ' + e.message); }
         }
@@ -916,9 +934,7 @@ SIMULATOR_TEMPLATE = """
         }
         function useSnapshotAsSleep() {
             if (!selectedSnapshot) return;
-            editorSleepChars = selectedSnapshot;
-            updateSleepCapturedNote();
-            setStatus('vbDot', 'vbStatus', 'vbTime', 'success', 'Set captured layout as sleep message — Save Board to keep');
+            stageSleepCapture(selectedSnapshot, 'Captured layout');
         }
         function currentBoardConfig() {
             // Values from the open editor (covers unsaved edits), else the selected board.
