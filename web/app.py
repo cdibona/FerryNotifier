@@ -371,9 +371,10 @@ TRMNL_MK_QUADRANT = """<div class="layout">
 # view, so this renders on all sizes and adapts via the framework's sm:/md:/lg:
 # breakpoint prefixes + hidden/block utilities. Each view tab just needs the stub.
 TRMNL_MK_SHARED = """<style>
-  .fn-wrap { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; }
+  /* TRMNL's .layout is a flex row, so wrap our content in a column of our own. */
+  .fn-wrap { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; display: flex; flex-direction: column; width: 100%; height: 100%; }
   .fn-hdr { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; padding-bottom: 10px; border-bottom: 4px solid #000; }
-  .fn-body { display: flex; gap: 22px; padding-top: 16px; }
+  .fn-body { display: flex; gap: 22px; padding-top: 16px; flex: 1; min-height: 0; }
   .fn-icon { flex: 0 0 148px; display: flex; align-items: flex-start; justify-content: center; }
   .fn-icon svg { width: 148px; height: 148px; }
   .fn-info { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -386,15 +387,29 @@ TRMNL_MK_SHARED = """<style>
   .fn-vessels { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
   .fn-vessel { font-size: 14px; color: #222; }
   .fn-vessel b { font-size: 15px; color: #000; }
-  /* Smaller layouts (half vertical / quadrant): drop the icon + vessel list. */
+  /* Narrow layouts (half vertical 400w, quadrant): drop the icon. */
   @media (max-width: 520px) {
-    .fn-icon, .fn-vessels { display: none; }
-    .fn-hdr { font-size: 22px; }
+    .fn-icon { display: none; }
+    .fn-hdr { font-size: 22px; padding-bottom: 6px; }
+    .fn-dir { font-size: 17px; }
     .fn-next { font-size: 30px; }
-    .fn-spaces { font-size: 18px; }
+    .fn-spaces { font-size: 17px; }
+  }
+  /* Short layouts (half horizontal 240h, quadrant): shrink + drop vessels. */
+  @media (max-height: 300px) {
+    .fn-body { padding-top: 8px; gap: 14px; }
+    .fn-icon { flex: 0 0 88px; } .fn-icon svg { width: 88px; height: 88px; }
+    .fn-info { gap: 6px; }
+    .fn-hdr { font-size: 20px; padding-bottom: 4px; border-bottom-width: 3px; }
+    .fn-dir { font-size: 16px; }
+    .fn-next { font-size: 26px; }
+    .fn-next small { font-size: 12px; }
+    .fn-spaces { font-size: 16px; }
+    .fn-vessels { display: none; }
   }
 </style>
-<div class="layout fn-wrap">
+<div class="layout">
+  <div class="fn-wrap">
   <div class="fn-hdr">{{ route_name }}</div>
   <div class="fn-body">
     <div class="fn-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
@@ -429,6 +444,7 @@ TRMNL_MK_SHARED = """<style>
       </div>
       {% endif %}
     </div>
+  </div>
   </div>
 </div>
 <div class="title_bar">
