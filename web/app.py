@@ -275,102 +275,180 @@ TRMNL_TEMPLATE = """
 # users can copy/paste into a TRMNL private plugin's Markup editor. These are
 # passed to the page as template VARIABLES, so Jinja inserts them literally and
 # does not try to interpret the Liquid {{ }} / {% %} inside them.
-TRMNL_MK_FULL = """<div class="layout">
-  <div class="columns">
-    <div class="column">
-      <span class="title title--large">{{ route_name }}</span>
+#
+# Two important lessons baked in here:
+#  1. TRMNL webhook merge_variables are only reliably reachable as TOP-LEVEL
+#     names in Liquid — nested access like {{ status.time_str }} renders blank on
+#     the device. ferry_merge_variables() therefore flattens the fields we render
+#     (has_status, dir_line, dir_short, time_str, spaces, delay) to the top level.
+#     `delay` is nil (not "") when there's none, because an empty string is TRUTHY
+#     in Liquid, so {% if delay %} would otherwise always fire.
+#  2. TRMNL renders each layout at its own size and CROPS oversized content — CSS
+#     media queries do not adapt a single template across layouts. So each view
+#     tab carries its own markup sized for that viewport, and the Shared tab is
+#     just a stub. (A single responsive template is offered as an alternative.)
 
-      {% if status %}
-      <div class="content" style="margin-top: 10px;">
-        <span class="label">{{ status.from }}{% if status.to %} &rarr; {{ status.to }}{% endif %}</span>
-        <span class="value value--xxlarge">{{ status.time_str | default: '--' }}</span>
-        <span class="label label--small">Next scheduled departure</span>
-      </div>
-      <div class="content" style="margin-top: 8px;">
-        <span class="value value--large">{{ status.spaces | default: '--' }} <span class="label">drive-up spaces</span></span>
-      </div>
-      <div class="content" style="margin-top: 8px;">
-        {% if status.delay %}
-        <span class="label" style="border-left: 5px solid #000; padding-left: 8px;">&#9888; {{ status.delay }}</span>
-        {% else %}
-        <span class="label" style="border: 2px solid #000; padding: 2px 10px; display: inline-block;">No delays</span>
+# The ferry glyph, shared by the layouts that have room for it.
+_FERRY_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+      <path d="M20 180 L40 210 L216 210 L236 180 L220 180 L220 140 L36 140 L36 180 Z" fill="black"/>
+      <path d="M30 210 Q50 220, 70 210 Q90 200, 110 210 Q130 220, 150 210 Q170 200, 190 210 Q210 220, 226 210" fill="none" stroke="black" stroke-width="6" stroke-linecap="round"/>
+      <rect x="55" y="100" width="146" height="40" fill="black"/>
+      <rect x="90" y="65" width="76" height="35" fill="black"/>
+      <rect x="170" y="45" width="25" height="55" fill="black"/>
+      <rect x="65" y="110" width="15" height="20" fill="white"/><rect x="90" y="110" width="15" height="20" fill="white"/>
+      <rect x="115" y="110" width="15" height="20" fill="white"/><rect x="140" y="110" width="15" height="20" fill="white"/>
+      <rect x="165" y="110" width="15" height="20" fill="white"/>
+      <rect x="100" y="73" width="20" height="18" fill="white"/><rect x="130" y="73" width="20" height="18" fill="white"/>
+      <rect x="50" y="150" width="35" height="25" fill="white"/><rect x="95" y="150" width="35" height="25" fill="white"/>
+      <rect x="140" y="150" width="35" height="25" fill="white"/><rect x="185" y="150" width="25" height="25" fill="white"/>
+    </svg>"""
+
+# The full title bar (with battery gauge), shared by every layout but the quadrant.
+_TITLE_BAR = """<div class="title_bar">
+  <span class="title">FerryNotifier</span>
+  <span class="instance">{{ update_date }} &middot; {{ update_time }}{% if trmnl.device.percent_charged %} &middot; <span style="display:inline-flex;align-items:center;vertical-align:middle;"><span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:{{ trmnl.device.percent_charged | round }}%;"></span></span><span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span></span>{% endif %}</span>
+</div>"""
+
+
+def _trmnl_mk(template: str) -> str:
+    """Expand <!--SVG--> / <!--TITLEBAR--> tokens in a layout template."""
+    return template.replace("<!--SVG-->", _FERRY_SVG).replace("<!--TITLEBAR-->", _TITLE_BAR)
+
+
+# Full layout — 800x480. Ferry icon + full info + vessel list.
+TRMNL_MK_FULL = _trmnl_mk("""<style>
+  .fnf { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; display: flex; flex-direction: column; width: 100%; height: 100%; box-sizing: border-box; }
+  .fnf-hdr { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; padding-bottom: 10px; border-bottom: 4px solid #000; }
+  .fnf-body { display: flex; gap: 22px; padding-top: 16px; flex: 1; min-height: 0; }
+  .fnf-icon { flex: 0 0 148px; display: flex; align-items: flex-start; justify-content: center; }
+  .fnf-icon svg { width: 148px; height: 148px; }
+  .fnf-info { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .fnf-dir { font-size: 21px; font-weight: 800; }
+  .fnf-next { font-size: 40px; font-weight: 800; line-height: 1; }
+  .fnf-next small { font-size: 15px; font-weight: 600; color: #444; letter-spacing: 0.5px; text-transform: uppercase; }
+  .fnf-spaces { font-size: 22px; font-weight: 700; }
+  .fnf-ok { align-self: flex-start; font-size: 15px; font-weight: 700; padding: 3px 12px; border: 2px solid #000; border-radius: 4px; }
+  .fnf-bad { align-self: flex-start; font-size: 15px; font-weight: 700; border-left: 5px solid #000; padding-left: 10px; }
+  .fnf-vessels { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
+  .fnf-vessel { font-size: 14px; color: #222; }
+  .fnf-vessel b { font-size: 15px; color: #000; }
+</style>
+<div class="layout">
+  <div class="fnf">
+    <div class="fnf-hdr">{{ route_name }}</div>
+    <div class="fnf-body">
+      <div class="fnf-icon"><!--SVG--></div>
+      <div class="fnf-info">
+        {% if has_status %}
+        <div class="fnf-dir">{{ dir_line }}</div>
+        <div class="fnf-next">{{ time_str | default: '--' }} <small>next departure</small></div>
+        <div class="fnf-spaces">{{ spaces | default: '--' }} drive-up spaces</div>
+        {% if delay %}<div class="fnf-bad">&#9888; {{ delay }}</div>{% else %}<span class="fnf-ok">No delays</span>{% endif %}
+        {% endif %}
+        {% if vessels and vessels.size > 0 %}
+        <div class="fnf-vessels">
+          {% for v in vessels %}
+          <div class="fnf-vessel"><b>{{ v.name }}</b>{% if v.status %} &mdash; {{ v.status }}{% endif %}{% if v.location %} &middot; {{ v.location }}{% endif %}</div>
+          {% endfor %}
+        </div>
         {% endif %}
       </div>
-      {% endif %}
+    </div>
+  </div>
+</div>
+<!--TITLEBAR-->""")
 
-      {% if vessels and vessels.size > 0 %}
-      <div class="content" style="margin-top: 10px;">
-        {% for vessel in vessels %}
-        <p style="margin: 2px 0;"><b>{{ vessel.name }}</b> &mdash; {{ vessel.status }}{% if vessel.location %} &middot; {{ vessel.location }}{% endif %}</p>
-        {% endfor %}
+# Half horizontal — 800x240. Small icon + one info row, no vessel list.
+TRMNL_MK_HALF_H = _trmnl_mk("""<style>
+  .fnh { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; display: flex; flex-direction: column; width: 100%; height: 100%; box-sizing: border-box; }
+  .fnh-hdr { font-size: 22px; font-weight: 800; padding-bottom: 5px; border-bottom: 3px solid #000; }
+  .fnh-body { display: flex; gap: 16px; align-items: center; padding-top: 10px; flex: 1; min-height: 0; }
+  .fnh-icon { flex: 0 0 76px; display: flex; justify-content: center; }
+  .fnh-icon svg { width: 76px; height: 76px; }
+  .fnh-info { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .fnh-dir { font-size: 16px; font-weight: 800; }
+  .fnh-next { font-size: 30px; font-weight: 800; line-height: 1; }
+  .fnh-next small { font-size: 12px; font-weight: 600; color: #444; text-transform: uppercase; }
+  .fnh-sub { font-size: 16px; font-weight: 700; }
+</style>
+<div class="layout">
+  <div class="fnh">
+    <div class="fnh-hdr">{{ route_name }}</div>
+    <div class="fnh-body">
+      <div class="fnh-icon"><!--SVG--></div>
+      <div class="fnh-info">
+        {% if has_status %}
+        <div class="fnh-dir">{{ dir_line }}</div>
+        <div class="fnh-next">{{ time_str | default: '--' }} <small>next departure</small></div>
+        <div class="fnh-sub">{{ spaces | default: '--' }} drive-up spaces &middot; {% if delay %}&#9888; {{ delay }}{% else %}No delays{% endif %}</div>
+        {% endif %}
       </div>
-      {% endif %}
     </div>
   </div>
 </div>
-<div class="title_bar">
-  <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_date }} &middot; {{ update_time }}{% if trmnl.device.percent_charged %} &middot; <span style="display:inline-flex;align-items:center;vertical-align:middle;"><span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:{{ trmnl.device.percent_charged | round }}%;"></span></span><span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span></span>{% endif %}</span>
-</div>"""
+<!--TITLEBAR-->""")
 
-TRMNL_MK_HALF_H = """<div class="layout">
-  <span class="title">{{ route_name }}</span>
-  {% if status %}
-  <div class="content" style="margin-top: 6px;">
-    <span class="value value--large">{{ status.from_short }}{% if status.to_short %} &rarr; {{ status.to_short }}{% endif %} {{ status.time_str | default: '--' }}</span>
-    <span class="label">{{ status.spaces | default: '--' }} spaces &middot; {% if status.delay %}{{ status.delay }}{% else %}No delays{% endif %}</span>
-  </div>
-  {% endif %}
-  {% for vessel in vessels %}
-  <span class="label label--small">{{ vessel.name }} - {{ vessel.status }}</span>
-  {% endfor %}
-</div>
-<div class="title_bar">
-  <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_date }} &middot; {{ update_time }}{% if trmnl.device.percent_charged %} &middot; <span style="display:inline-flex;align-items:center;vertical-align:middle;"><span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:{{ trmnl.device.percent_charged | round }}%;"></span></span><span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span></span>{% endif %}</span>
-</div>"""
-
-TRMNL_MK_HALF_V = """<div class="layout">
-  <div class="columns">
-    <div class="column">
-      <span class="title title--small">{{ route_name }}</span>
-      {% if status %}
-      <div class="content" style="margin-top: 6px;">
-        <span class="label">{{ status.from_short }}{% if status.to_short %} &rarr; {{ status.to_short }}{% endif %}</span>
-        <span class="value value--large">{{ status.time_str | default: '--' }}</span>
-        <span class="label label--small">{{ status.spaces | default: '--' }} spaces &middot; {% if status.delay %}Delays{% else %}No delays{% endif %}</span>
-      </div>
-      {% endif %}
-      {% for vessel in vessels %}
-      <span class="label label--small">{{ vessel.name }} - {{ vessel.status }}</span>
-      {% endfor %}
+# Half vertical — 400x480. Centered icon on top, stacked info below (too narrow
+# for a side-by-side icon).
+TRMNL_MK_HALF_V = _trmnl_mk("""<style>
+  .fnv { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; display: flex; flex-direction: column; width: 100%; height: 100%; box-sizing: border-box; }
+  .fnv-hdr { font-size: 23px; font-weight: 800; padding-bottom: 8px; border-bottom: 4px solid #000; }
+  .fnv-icon { display: flex; justify-content: center; padding: 12px 0; }
+  .fnv-icon svg { width: 110px; height: 110px; }
+  .fnv-info { display: flex; flex-direction: column; gap: 12px; }
+  .fnv-dir { font-size: 18px; font-weight: 800; }
+  .fnv-next { font-size: 38px; font-weight: 800; line-height: 1; }
+  .fnv-next small { font-size: 13px; font-weight: 600; color: #444; text-transform: uppercase; }
+  .fnv-spaces { font-size: 19px; font-weight: 700; }
+  .fnv-ok { align-self: flex-start; font-size: 14px; font-weight: 700; padding: 3px 12px; border: 2px solid #000; border-radius: 4px; }
+  .fnv-bad { align-self: flex-start; font-size: 14px; font-weight: 700; border-left: 5px solid #000; padding-left: 10px; }
+</style>
+<div class="layout">
+  <div class="fnv">
+    <div class="fnv-hdr">{{ route_name }}</div>
+    <div class="fnv-icon"><!--SVG--></div>
+    {% if has_status %}
+    <div class="fnv-info">
+      <div class="fnv-dir">{{ dir_line }}</div>
+      <div class="fnv-next">{{ time_str | default: '--' }} <small>next departure</small></div>
+      <div class="fnv-spaces">{{ spaces | default: '--' }} drive-up spaces</div>
+      {% if delay %}<div class="fnv-bad">&#9888; {{ delay }}</div>{% else %}<span class="fnv-ok">No delays</span>{% endif %}
     </div>
+    {% endif %}
   </div>
 </div>
-<div class="title_bar">
-  <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_date }} &middot; {{ update_time }}{% if trmnl.device.percent_charged %} &middot; <span style="display:inline-flex;align-items:center;vertical-align:middle;"><span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:{{ trmnl.device.percent_charged | round }}%;"></span></span><span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span></span>{% endif %}</span>
-</div>"""
+<!--TITLEBAR-->""")
 
-TRMNL_MK_QUADRANT = """<div class="layout">
-  <div class="columns">
-    <div class="column">
-      <span class="label">{{ route_name }}</span>
-      {% if status %}
-      <span class="value value--large">{{ status.from_short }}{% if status.to_short %}&rarr;{{ status.to_short }}{% endif %} {{ status.time_str | default: '--' }}</span>
-      <span class="label label--small">{{ status.spaces | default: '--' }} spaces &middot; {% if status.delay %}Delays{% else %}No delays{% endif %}</span>
-      {% endif %}
+# Quadrant — 400x240. Tightest layout: no icon, short terminal names, no vessels.
+TRMNL_MK_QUADRANT = """<style>
+  .fnq { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; display: flex; flex-direction: column; width: 100%; height: 100%; box-sizing: border-box; }
+  .fnq-hdr { font-size: 18px; font-weight: 800; padding-bottom: 4px; border-bottom: 2px solid #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fnq-body { padding-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+  .fnq-dir { font-size: 14px; font-weight: 700; }
+  .fnq-next { font-size: 30px; font-weight: 800; line-height: 1; }
+  .fnq-next small { font-size: 11px; font-weight: 600; color: #444; text-transform: uppercase; }
+  .fnq-sub { font-size: 14px; font-weight: 700; }
+</style>
+<div class="layout">
+  <div class="fnq">
+    <div class="fnq-hdr">{{ route_name }}</div>
+    {% if has_status %}
+    <div class="fnq-body">
+      <div class="fnq-dir">{{ dir_short }}</div>
+      <div class="fnq-next">{{ time_str | default: '--' }} <small>next departure</small></div>
+      <div class="fnq-sub">{{ spaces | default: '--' }} spaces &middot; {% if delay %}Delays{% else %}No delays{% endif %}</div>
     </div>
+    {% endif %}
   </div>
 </div>
 <div class="title_bar">
   <span class="title">Ferry</span>
 </div>"""
 
-# One responsive template for the Shared tab. Shared markup is prepended to every
-# view, so this renders on all sizes and adapts via the framework's sm:/md:/lg:
-# breakpoint prefixes + hidden/block utilities. Each view tab just needs the stub.
-TRMNL_MK_SHARED = """<style>
+# Alternative: one responsive template for the Shared tab (single paste). Adapts
+# with CSS media queries, but because TRMNL crops rather than reflows on smaller
+# layouts, tiny mashup slots may clip — the per-view markup above is preferred.
+TRMNL_MK_SHARED = _trmnl_mk("""<style>
   /* TRMNL's .layout is a flex row, so wrap our content in a column of our own. */
   .fn-wrap { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; display: flex; flex-direction: column; width: 100%; height: 100%; }
   .fn-hdr { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; padding-bottom: 10px; border-bottom: 4px solid #000; }
@@ -387,7 +465,6 @@ TRMNL_MK_SHARED = """<style>
   .fn-vessels { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
   .fn-vessel { font-size: 14px; color: #222; }
   .fn-vessel b { font-size: 15px; color: #000; }
-  /* Narrow layouts (half vertical 400w, quadrant): drop the icon. */
   @media (max-width: 520px) {
     .fn-icon { display: none; }
     .fn-hdr { font-size: 22px; padding-bottom: 6px; }
@@ -395,7 +472,6 @@ TRMNL_MK_SHARED = """<style>
     .fn-next { font-size: 30px; }
     .fn-spaces { font-size: 17px; }
   }
-  /* Short layouts (half horizontal 240h, quadrant): shrink + drop vessels. */
   @media (max-height: 300px) {
     .fn-body { padding-top: 8px; gap: 14px; }
     .fn-icon { flex: 0 0 88px; } .fn-icon svg { width: 88px; height: 88px; }
@@ -412,26 +488,14 @@ TRMNL_MK_SHARED = """<style>
   <div class="fn-wrap">
   <div class="fn-hdr">{{ route_name }}</div>
   <div class="fn-body">
-    <div class="fn-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-      <path d="M20 180 L40 210 L216 210 L236 180 L220 180 L220 140 L36 140 L36 180 Z" fill="black"/>
-      <path d="M30 210 Q50 220, 70 210 Q90 200, 110 210 Q130 220, 150 210 Q170 200, 190 210 Q210 220, 226 210" fill="none" stroke="black" stroke-width="6" stroke-linecap="round"/>
-      <rect x="55" y="100" width="146" height="40" fill="black"/>
-      <rect x="90" y="65" width="76" height="35" fill="black"/>
-      <rect x="170" y="45" width="25" height="55" fill="black"/>
-      <rect x="65" y="110" width="15" height="20" fill="white"/><rect x="90" y="110" width="15" height="20" fill="white"/>
-      <rect x="115" y="110" width="15" height="20" fill="white"/><rect x="140" y="110" width="15" height="20" fill="white"/>
-      <rect x="165" y="110" width="15" height="20" fill="white"/>
-      <rect x="100" y="73" width="20" height="18" fill="white"/><rect x="130" y="73" width="20" height="18" fill="white"/>
-      <rect x="50" y="150" width="35" height="25" fill="white"/><rect x="95" y="150" width="35" height="25" fill="white"/>
-      <rect x="140" y="150" width="35" height="25" fill="white"/><rect x="185" y="150" width="25" height="25" fill="white"/>
-    </svg></div>
+    <div class="fn-icon"><!--SVG--></div>
     <div class="fn-info">
-      {% if status %}
-      <div class="fn-dir">{{ status.from }}{% if status.to %} &#8594; {{ status.to }}{% endif %}</div>
-      <div class="fn-next">{{ status.time_str | default: '--' }} <small>next departure</small></div>
-      <div class="fn-spaces">{{ status.spaces | default: '--' }} drive-up spaces</div>
-      {% if status.delay %}
-      <div class="fn-bad">&#9888; {{ status.delay }}</div>
+      {% if has_status %}
+      <div class="fn-dir">{{ dir_line }}</div>
+      <div class="fn-next">{{ time_str | default: '--' }} <small>next departure</small></div>
+      <div class="fn-spaces">{{ spaces | default: '--' }} drive-up spaces</div>
+      {% if delay %}
+      <div class="fn-bad">&#9888; {{ delay }}</div>
       {% else %}
       <span class="fn-ok">No delays</span>
       {% endif %}
@@ -447,13 +511,11 @@ TRMNL_MK_SHARED = """<style>
   </div>
   </div>
 </div>
-<div class="title_bar">
-  <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_date }} &middot; {{ update_time }}{% if trmnl.device.percent_charged %} &middot; <span style="display:inline-flex;align-items:center;vertical-align:middle;"><span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:{{ trmnl.device.percent_charged | round }}%;"></span></span><span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span></span>{% endif %}</span>
-</div>"""
+<!--TITLEBAR-->""")
 
-# Non-empty stub for each view tab (views can't be blank, but Shared does the work).
-TRMNL_MK_VIEW_STUB = """<!-- FerryNotifier renders from the Shared tab -->"""
+# Non-empty stub for a view tab (views can't be blank). Used for the Shared tab
+# when pasting per-view markup, or for every view tab when using Shared alone.
+TRMNL_MK_VIEW_STUB = """<!-- FerryNotifier renders from its layout tabs -->"""
 
 
 # HTML template for webhook simulator frontend
@@ -739,42 +801,45 @@ SIMULATOR_TEMPLATE = """
                 </ol>
 
                 <div class="markup-recommended">
-                    <div class="rec-badge">Recommended · one responsive template</div>
-                    <p class="hint" style="margin-top:0">Paste this into the <strong>Shared</strong> tab. It's self-contained
-                        (its own styles + the ferry icon) so the device renders like the preview above. On smaller layouts
-                        (half vertical / quadrant) it drops the icon and vessel list.</p>
+                    <div class="rec-badge">Recommended · one block per layout</div>
+                    <p class="hint" style="margin-top:0">TRMNL renders each layout at its own size and <strong>crops</strong>
+                        anything too big — so each layout gets its own block, sized to fit. First set the
+                        <strong>Shared</strong> tab to this stub (Shared is prepended to every view, so keep it empty of layout):</p>
                     <div class="markup-block">
-                        <div class="markup-head"><span>Shared tab</span><button type="button" class="btn btn-primary" onclick="copyMarkup('mkShared', this)">Copy</button></div>
-                        <textarea id="mkShared" class="markup-ta" readonly rows="18">{{ markup_shared }}</textarea>
-                    </div>
-                    <p class="hint" style="margin-top:12px">Then paste this stub into <strong>each</strong> of the Full,
-                        Half Horizontal, Half Vertical and Quadrant tabs (TRMNL skips empty views):</p>
-                    <div class="markup-block">
-                        <div class="markup-head"><span>Every view tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkStub', this)">Copy</button></div>
+                        <div class="markup-head"><span>Shared tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkStub', this)">Copy</button></div>
                         <textarea id="mkStub" class="markup-ta" readonly rows="1">{{ markup_view_stub }}</textarea>
+                    </div>
+                    <p class="hint" style="margin-top:12px">Then paste each block into its matching layout tab. If your device only
+                        ever shows the full screen, the <strong>Full</strong> tab is the one that matters — the others are for
+                        half/quadrant mashups:</p>
+                    <div class="markup-blocks">
+                        <div class="markup-block">
+                            <div class="markup-head"><span>Full tab</span><button type="button" class="btn btn-primary" onclick="copyMarkup('mkFull', this)">Copy</button></div>
+                            <textarea id="mkFull" class="markup-ta" readonly rows="18">{{ markup_full }}</textarea>
+                        </div>
+                        <div class="markup-block">
+                            <div class="markup-head"><span>Half Horizontal tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkHalfH', this)">Copy</button></div>
+                            <textarea id="mkHalfH" class="markup-ta" readonly rows="12">{{ markup_half_h }}</textarea>
+                        </div>
+                        <div class="markup-block">
+                            <div class="markup-head"><span>Half Vertical tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkHalfV', this)">Copy</button></div>
+                            <textarea id="mkHalfV" class="markup-ta" readonly rows="12">{{ markup_half_v }}</textarea>
+                        </div>
+                        <div class="markup-block">
+                            <div class="markup-head"><span>Quadrant tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkQuadrant', this)">Copy</button></div>
+                            <textarea id="mkQuadrant" class="markup-ta" readonly rows="11">{{ markup_quadrant }}</textarea>
+                        </div>
                     </div>
                 </div>
 
                 <details class="markup-alt">
-                    <summary>Prefer separate markup per layout? (skip the Shared tab)</summary>
-                    <p class="hint">Paste each block into its own layout tab instead.</p>
-                    <div class="markup-blocks">
-                        <div class="markup-block">
-                            <div class="markup-head"><span>Full tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkFull', this)">Copy</button></div>
-                            <textarea id="mkFull" class="markup-ta" readonly rows="16">{{ markup_full }}</textarea>
-                        </div>
-                        <div class="markup-block">
-                            <div class="markup-head"><span>Half Horizontal tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkHalfH', this)">Copy</button></div>
-                            <textarea id="mkHalfH" class="markup-ta" readonly rows="9">{{ markup_half_h }}</textarea>
-                        </div>
-                        <div class="markup-block">
-                            <div class="markup-head"><span>Half Vertical tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkHalfV', this)">Copy</button></div>
-                            <textarea id="mkHalfV" class="markup-ta" readonly rows="11">{{ markup_half_v }}</textarea>
-                        </div>
-                        <div class="markup-block">
-                            <div class="markup-head"><span>Quadrant tab</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkQuadrant', this)">Copy</button></div>
-                            <textarea id="mkQuadrant" class="markup-ta" readonly rows="8">{{ markup_quadrant }}</textarea>
-                        </div>
+                    <summary>Prefer a single template? (one paste, but mashup layouts may crop)</summary>
+                    <p class="hint">Paste this one responsive block into the <strong>Shared</strong> tab, then paste the stub above
+                        into each of the Full / Half Horizontal / Half Vertical / Quadrant tabs. It adapts with CSS, but because
+                        TRMNL crops instead of reflowing, tiny mashup slots can still clip.</p>
+                    <div class="markup-block">
+                        <div class="markup-head"><span>Shared tab (single template)</span><button type="button" class="btn btn-secondary" onclick="copyMarkup('mkShared', this)">Copy</button></div>
+                        <textarea id="mkShared" class="markup-ta" readonly rows="18">{{ markup_shared }}</textarea>
                     </div>
                 </details>
             </div>
@@ -2229,13 +2294,34 @@ def ferry_merge_variables(route: Optional[str], direction: Optional[str],
     data = fetch_ferry_status(route or None, api_key=wsdot_key)
     status = compute_direction_status(data, route, direction) if route else None
     formatted = format_ferry_data(data)
-    return {
+    mv = {
         "route_name": formatted.get("route_name"),
         "update_time": formatted.get("update_time"),
         "update_date": formatted.get("update_date"),
-        "status": status,
+        "status": status,  # kept for polling/JSON consumers that read status.*
         "vessels": formatted.get("vessels", [])[:MAX_VESSELS_DISPLAY],
     }
+    # Flatten the rendered fields to top-level names. TRMNL webhook markup can't
+    # reliably reach nested object fields ({{ status.time_str }} renders blank on
+    # the device), so the layouts read these top-level keys instead. `delay` is
+    # left as None (not "") when absent, because an empty string is truthy in
+    # Liquid and would make {% if delay %} always fire.
+    def _dir(a, b):
+        a = a or ""
+        return f"{a} → {b}" if b else a
+    if status:
+        mv.update({
+            "has_status": True,
+            "dir_line": _dir(status.get("from"), status.get("to")),
+            "dir_short": _dir(status.get("from_short"), status.get("to_short")),
+            "time_str": status.get("time_str") or "--",
+            "spaces": status.get("spaces"),
+            "delay": status.get("delay") or None,
+        })
+    else:
+        mv.update({"has_status": False, "dir_line": "", "dir_short": "",
+                   "time_str": "--", "spaces": None, "delay": None})
+    return mv
 
 
 def send_to_trmnl(webhook_url: str, merge_variables: Dict[str, Any]) -> Dict[str, Any]:
