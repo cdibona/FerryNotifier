@@ -370,34 +370,61 @@ TRMNL_MK_QUADRANT = """<div class="layout">
 # One responsive template for the Shared tab. Shared markup is prepended to every
 # view, so this renders on all sizes and adapts via the framework's sm:/md:/lg:
 # breakpoint prefixes + hidden/block utilities. Each view tab just needs the stub.
-TRMNL_MK_SHARED = """<div class="layout">
-  <div class="columns">
-    <div class="column">
-      <span class="title title--small lg:title--large">{{ route_name }}</span>
-
+TRMNL_MK_SHARED = """<style>
+  .fn-wrap { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #000; }
+  .fn-hdr { font-size: 30px; font-weight: 800; letter-spacing: -0.5px; padding-bottom: 10px; border-bottom: 4px solid #000; }
+  .fn-body { display: flex; gap: 22px; padding-top: 16px; }
+  .fn-icon { flex: 0 0 148px; display: flex; align-items: flex-start; justify-content: center; }
+  .fn-icon svg { width: 148px; height: 148px; }
+  .fn-info { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .fn-dir { font-size: 21px; font-weight: 800; }
+  .fn-next { font-size: 40px; font-weight: 800; line-height: 1; }
+  .fn-next small { font-size: 15px; font-weight: 600; color: #444; letter-spacing: 0.5px; text-transform: uppercase; }
+  .fn-spaces { font-size: 22px; font-weight: 700; }
+  .fn-ok { align-self: flex-start; font-size: 15px; font-weight: 700; padding: 3px 12px; border: 2px solid #000; border-radius: 4px; }
+  .fn-bad { align-self: flex-start; font-size: 15px; font-weight: 700; border-left: 5px solid #000; padding-left: 10px; }
+  .fn-vessels { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
+  .fn-vessel { font-size: 14px; color: #222; }
+  .fn-vessel b { font-size: 15px; color: #000; }
+  /* Smaller layouts (half vertical / quadrant): drop the icon + vessel list. */
+  @media (max-width: 520px) {
+    .fn-icon, .fn-vessels { display: none; }
+    .fn-hdr { font-size: 22px; }
+    .fn-next { font-size: 30px; }
+    .fn-spaces { font-size: 18px; }
+  }
+</style>
+<div class="layout fn-wrap">
+  <div class="fn-hdr">{{ route_name }}</div>
+  <div class="fn-body">
+    <div class="fn-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+      <path d="M20 180 L40 210 L216 210 L236 180 L220 180 L220 140 L36 140 L36 180 Z" fill="black"/>
+      <path d="M30 210 Q50 220, 70 210 Q90 200, 110 210 Q130 220, 150 210 Q170 200, 190 210 Q210 220, 226 210" fill="none" stroke="black" stroke-width="6" stroke-linecap="round"/>
+      <rect x="55" y="100" width="146" height="40" fill="black"/>
+      <rect x="90" y="65" width="76" height="35" fill="black"/>
+      <rect x="170" y="45" width="25" height="55" fill="black"/>
+      <rect x="65" y="110" width="15" height="20" fill="white"/><rect x="90" y="110" width="15" height="20" fill="white"/>
+      <rect x="115" y="110" width="15" height="20" fill="white"/><rect x="140" y="110" width="15" height="20" fill="white"/>
+      <rect x="165" y="110" width="15" height="20" fill="white"/>
+      <rect x="100" y="73" width="20" height="18" fill="white"/><rect x="130" y="73" width="20" height="18" fill="white"/>
+      <rect x="50" y="150" width="35" height="25" fill="white"/><rect x="95" y="150" width="35" height="25" fill="white"/>
+      <rect x="140" y="150" width="35" height="25" fill="white"/><rect x="185" y="150" width="25" height="25" fill="white"/>
+    </svg></div>
+    <div class="fn-info">
       {% if status %}
-      <div class="content" style="margin-top: 8px;">
-        <span class="label hidden lg:block">{{ status.from }}{% if status.to %} &rarr; {{ status.to }}{% endif %}</span>
-        <span class="label lg:hidden">{{ status.from_short }}{% if status.to_short %} &rarr; {{ status.to_short }}{% endif %}</span>
-        <span class="value value--large lg:value--xxlarge">{{ status.time_str | default: '--' }}</span>
-        <span class="label label--small">Next departure</span>
-      </div>
-      <div class="content" style="margin-top: 6px;">
-        <span class="value value--small lg:value--base">{{ status.spaces | default: '--' }} <span class="label label--small">spaces</span></span>
-      </div>
-      <div class="content" style="margin-top: 6px;">
-        {% if status.delay %}
-        <span class="label" style="border-left: 4px solid #000; padding-left: 6px;">&#9888; {{ status.delay }}</span>
-        {% else %}
-        <span class="label" style="border: 1px solid #000; padding: 1px 8px; display: inline-block;">No delays</span>
-        {% endif %}
-      </div>
+      <div class="fn-dir">{{ status.from }}{% if status.to %} &#8594; {{ status.to }}{% endif %}</div>
+      <div class="fn-next">{{ status.time_str | default: '--' }} <small>next departure</small></div>
+      <div class="fn-spaces">{{ status.spaces | default: '--' }} drive-up spaces</div>
+      {% if status.delay %}
+      <div class="fn-bad">&#9888; {{ status.delay }}</div>
+      {% else %}
+      <span class="fn-ok">No delays</span>
       {% endif %}
-
+      {% endif %}
       {% if vessels and vessels.size > 0 %}
-      <div class="content hidden lg:block" style="margin-top: 8px;">
-        {% for vessel in vessels %}
-        <p style="margin: 2px 0;"><b>{{ vessel.name }}</b> &mdash; {{ vessel.status }}{% if vessel.location %} &middot; {{ vessel.location }}{% endif %}</p>
+      <div class="fn-vessels">
+        {% for v in vessels %}
+        <div class="fn-vessel"><b>{{ v.name }}</b>{% if v.status %} &mdash; {{ v.status }}{% endif %}{% if v.location %} &middot; {{ v.location }}{% endif %}</div>
         {% endfor %}
       </div>
       {% endif %}
@@ -697,9 +724,9 @@ SIMULATOR_TEMPLATE = """
 
                 <div class="markup-recommended">
                     <div class="rec-badge">Recommended · one responsive template</div>
-                    <p class="hint" style="margin-top:0">Paste this into the <strong>Shared</strong> tab. It renders on all
-                        sizes and adapts (full names + vessel list on the big screen, compact on smaller ones) using
-                        TRMNL's <code>sm:</code>/<code>md:</code>/<code>lg:</code> responsive classes.</p>
+                    <p class="hint" style="margin-top:0">Paste this into the <strong>Shared</strong> tab. It's self-contained
+                        (its own styles + the ferry icon) so the device renders like the preview above. On smaller layouts
+                        (half vertical / quadrant) it drops the icon and vessel list.</p>
                     <div class="markup-block">
                         <div class="markup-head"><span>Shared tab</span><button type="button" class="btn btn-primary" onclick="copyMarkup('mkShared', this)">Copy</button></div>
                         <textarea id="mkShared" class="markup-ta" readonly rows="18">{{ markup_shared }}</textarea>
@@ -2730,8 +2757,8 @@ TRMNL_PREVIEW_TEMPLATE = """
         .next { font-size: 40px; font-weight: 800; line-height: 1; }
         .next small { font-size: 15px; font-weight: 600; color: #444; letter-spacing: 0.5px; text-transform: uppercase; }
         .spaces { font-size: 22px; font-weight: 700; }
-        .delay-ok { display: inline-block; font-size: 15px; font-weight: 700; padding: 3px 12px; border: 2px solid #000; border-radius: 4px; }
-        .delay-bad { font-size: 15px; font-weight: 700; border-left: 5px solid #000; padding-left: 10px; }
+        .delay-ok { align-self: flex-start; font-size: 15px; font-weight: 700; padding: 3px 12px; border: 2px solid #000; border-radius: 4px; }
+        .delay-bad { align-self: flex-start; font-size: 15px; font-weight: 700; border-left: 5px solid #000; padding-left: 10px; }
         .vessels { margin-top: 4px; display: flex; flex-direction: column; gap: 5px; }
         .vessel { font-size: 14px; color: #222; }
         .vessel b { font-size: 15px; color: #000; }
