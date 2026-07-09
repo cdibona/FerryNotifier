@@ -984,7 +984,8 @@ SIMULATOR_TEMPLATE = """
         </div>
 
         <div class="app-footer">
-            FerryNotifier {{ app_version }}{% if git_sha %} &middot; <a href="{{ repo_url }}/commit/{{ git_sha }}" target="_blank" rel="noopener">{{ git_sha[:7] }}</a>{% endif %}
+            <a href="{{ repo_url }}/releases" target="_blank" rel="noopener">FerryNotifier {{ app_version }} &mdash; releases</a>{% if git_sha %} &middot; <a href="{{ repo_url }}/commit/{{ git_sha }}" target="_blank" rel="noopener">{{ git_sha[:7] }}</a>{% endif %}
+            <div>FerryNotifier Copyright 2026 &middot; <a href="https://halogenica.com" target="_blank" rel="noopener">https://halogenica.com</a></div>
         </div>
     </div>
 
