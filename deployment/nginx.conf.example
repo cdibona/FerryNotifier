@@ -1,6 +1,6 @@
-# Example Nginx configuration for FerryTrmnl
-# Place this in /etc/nginx/sites-available/ferrytrmnl
-# Then create a symlink: sudo ln -s /etc/nginx/sites-available/ferrytrmnl /etc/nginx/sites-enabled/
+# Example Nginx configuration for FerryNotifier
+# Place this in /etc/nginx/sites-available/ferrynotifier
+# Then create a symlink: sudo ln -s /etc/nginx/sites-available/ferrynotifier /etc/nginx/sites-enabled/
 
 # HTTP server - redirects to HTTPS
 server {
@@ -42,8 +42,8 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
 
     # Logging
-    access_log /var/log/nginx/ferrytrmnl_access.log;
-    error_log /var/log/nginx/ferrytrmnl_error.log;
+    access_log /var/log/nginx/ferrynotifier_access.log;
+    error_log /var/log/nginx/ferrynotifier_error.log;
 
     # Max body size
     client_max_body_size 1M;

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick start script for FerryTrmnl development server
+# Quick start script for FerryNotifier development server
 # Run from project root: ./deployment/run.sh
 
 # Color output
@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-echo "FerryTrmnl - Washington State Ferry Status Webhook"
+echo "FerryNotifier - Washington State Ferry Status Webhook"
 echo "===================================================="
 echo ""
 
@@ -42,7 +42,7 @@ if ! python3 -c "import flask" 2>/dev/null; then
     pip install -r web/requirements.txt
 fi
 
-echo -e "${GREEN}Starting FerryTrmnl webhook server...${NC}"
+echo -e "${GREEN}Starting FerryNotifier webhook server...${NC}"
 echo ""
 echo "Server will be available at:"
 echo "  - http://localhost:${FLASK_PORT:-5050}/webhook"

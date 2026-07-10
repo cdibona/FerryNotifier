@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  ferrytrmnl:
+  ferrynotifier:
     build:
       context: ..
       dockerfile: deployment/Dockerfile
-    container_name: ferrytrmnl
+    container_name: ferrynotifier
     restart: unless-stopped
     ports:
       - "5050:5050"

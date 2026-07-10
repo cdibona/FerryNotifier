@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple tests for FerryTrmnl application
+Simple tests for FerryNotifier application
 These tests verify basic functionality without requiring an actual API key.
 """
 
@@ -95,7 +95,7 @@ def test_webhook_with_mock_data(mock_get):
     response = client.get('/webhook')
 
     assert response.status_code == 200
-    assert b'FerryTrmnl' in response.data
+    assert b'FerryNotifier' in response.data
     assert b'Test Ferry' in response.data
 
 

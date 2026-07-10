@@ -1,4 +1,4 @@
-# FerryTrmnl
+# FerryNotifier
 
 A Washington State Ferry status display plugin for [Trmnl](https://usetrmnl.com/) e-ink displays. This webhook server fetches real-time ferry status information from the WSDOT Ferries API and displays it on your Trmnl device.
 
@@ -16,7 +16,7 @@ A Washington State Ferry status display plugin for [Trmnl](https://usetrmnl.com/
 ## Project Structure
 
 ```
-FerryTrmnl/
+FerryNotifier/
 ├── web/                    # Web application code
 │   ├── app.py              # Main Flask application
 │   ├── test_app.py         # Unit tests
@@ -24,7 +24,7 @@ FerryTrmnl/
 ├── deployment/             # Deployment configurations
 │   ├── Dockerfile          # Docker container definition
 │   ├── docker-compose.yml  # Docker Compose configuration
-│   ├── ferrytrmnl.service  # Systemd service file
+│   ├── ferrynotifier.service  # Systemd service file
 │   ├── nginx.conf.example  # Nginx reverse proxy config
 │   └── run.sh              # Quick-start development script
 ├── .github/
@@ -52,8 +52,8 @@ FerryTrmnl/
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/cdibona/FerryTrmnl.git
-   cd FerryTrmnl
+   git clone https://github.com/cdibona/FerryNotifier.git
+   cd FerryNotifier
    ```
 
 2. **Install dependencies**:
@@ -260,11 +260,11 @@ Root endpoint providing service information and available endpoints.
 
 ## Trmnl Plugin Configuration
 
-This section provides detailed instructions for configuring FerryTrmnl as a plugin in the Trmnl dashboard.
+This section provides detailed instructions for configuring FerryNotifier as a plugin in the Trmnl dashboard.
 
 ### Step 1: Deploy Your Webhook Server
 
-Before configuring Trmnl, you need your FerryTrmnl server running and accessible from the internet:
+Before configuring Trmnl, you need your FerryNotifier server running and accessible from the internet:
 
 1. Deploy to a server with a public IP or domain name
 2. Set up HTTPS using Let's Encrypt (see [INSTALL.md](INSTALL.md))
@@ -344,7 +344,7 @@ In TRMNL's **Markup Editor**, you'll see tabs for different layout sizes. Paste 
   </div>
 </div>
 <div class="title_bar">
-  <span class="title">FerryTrmnl</span>
+  <span class="title">FerryNotifier</span>
   <span class="instance">{{ update_time }}</span>
 </div>
 ```
@@ -362,7 +362,7 @@ In TRMNL's **Markup Editor**, you'll see tabs for different layout sizes. Paste 
   <span class="label label--small">{% for space in terminal_spaces %}{{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}{% endfor %}</span>
 </div>
 <div class="title_bar">
-  <span class="title">FerryTrmnl</span>
+  <span class="title">FerryNotifier</span>
   <span class="instance">{{ update_time }}</span>
 </div>
 ```
@@ -392,7 +392,7 @@ In TRMNL's **Markup Editor**, you'll see tabs for different layout sizes. Paste 
   </div>
 </div>
 <div class="title_bar">
-  <span class="title">FerryTrmnl</span>
+  <span class="title">FerryNotifier</span>
   <span class="instance">{{ update_time }}</span>
 </div>
 ```
@@ -484,10 +484,10 @@ Build and run with Docker:
 
 ```bash
 # Build from project root
-docker build -f deployment/Dockerfile -t ferrytrmnl .
+docker build -f deployment/Dockerfile -t ferrynotifier .
 
 # Run with a persistent data dir so targets/keys/schedules survive updates
-docker run -p 5050:5050 --env-file .env -v "$HOME/.ferrynotifier:/app/data" ferrytrmnl
+docker run -p 5050:5050 --env-file .env -v "$HOME/.ferrynotifier:/app/data" ferrynotifier
 ```
 
 Or use docker-compose (mounts the `ferry-data` volume for you):
@@ -562,10 +562,10 @@ and no login is needed to pull it.
 Copy the systemd service file:
 
 ```bash
-sudo cp deployment/ferrytrmnl.service /etc/systemd/system/
+sudo cp deployment/ferrynotifier.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable ferrytrmnl
-sudo systemctl start ferrytrmnl
+sudo systemctl enable ferrynotifier
+sudo systemctl start ferrynotifier
 ```
 
 ### Nginx Configuration
@@ -573,9 +573,9 @@ sudo systemctl start ferrytrmnl
 Copy and configure nginx:
 
 ```bash
-sudo cp deployment/nginx.conf.example /etc/nginx/sites-available/ferrytrmnl
+sudo cp deployment/nginx.conf.example /etc/nginx/sites-available/ferrynotifier
 # Edit and replace ferry.yourdomain.com with your domain
-sudo ln -s /etc/nginx/sites-available/ferrytrmnl /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/ferrynotifier /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -663,9 +663,9 @@ curl "http://localhost:5050/webhook?route_id=YOUR_ROUTE_ID"
 - Or stop the process using port 5050: `sudo lsof -ti:5050 | xargs kill -9`
 
 **Nginx 502 Bad Gateway**:
-- Ensure the Flask/Gunicorn service is running: `sudo systemctl status ferrytrmnl`
+- Ensure the Flask/Gunicorn service is running: `sudo systemctl status ferrynotifier`
 - Check that the port in nginx config matches your Flask port
-- Review logs: `sudo journalctl -u ferrytrmnl -f`
+- Review logs: `sudo journalctl -u ferrynotifier -f`
 
 ### Logs
 
@@ -673,7 +673,7 @@ View application logs:
 
 ```bash
 # If running with systemd
-sudo journalctl -u ferrytrmnl -f
+sudo journalctl -u ferrynotifier -f
 
 # If running directly
 # Logs will appear in the terminal
@@ -682,8 +682,8 @@ sudo journalctl -u ferrytrmnl -f
 View nginx logs:
 
 ```bash
-sudo tail -f /var/log/nginx/ferrytrmnl_error.log
-sudo tail -f /var/log/nginx/ferrytrmnl_access.log
+sudo tail -f /var/log/nginx/ferrynotifier_error.log
+sudo tail -f /var/log/nginx/ferrynotifier_access.log
 ```
 
 ## Contributing
@@ -702,7 +702,7 @@ This project is open source and available under the MIT License.
 
 ## Support
 
-For issues, questions, or contributions, please visit the [GitHub repository](https://github.com/cdibona/FerryTrmnl).
+For issues, questions, or contributions, please visit the [GitHub repository](https://github.com/cdibona/FerryNotifier).
 
 ## Related Links
 

@@ -1,15 +1,15 @@
-# Systemd service file for FerryNotifier (Staging)
+# Systemd service file for FerryNotifier
 # Place this file in /etc/systemd/system/ferrynotifier.service
 #
 # Installation:
-# 1. Copy this file: sudo cp deployment/ferrytrmnl-staging.service /etc/systemd/system/ferrynotifier.service
+# 1. Copy this file: sudo cp deployment/ferrynotifier.service /etc/systemd/system/
 # 2. Reload systemd: sudo systemctl daemon-reload
 # 3. Enable service: sudo systemctl enable ferrynotifier
 # 4. Start service: sudo systemctl start ferrynotifier
 # 5. Check status: sudo systemctl status ferrynotifier
 
 [Unit]
-Description=FerryNotifier Washington State Ferry Status Server (Staging)
+Description=FerryNotifier Washington State Ferry Status Webhook Server
 Documentation=https://github.com/cdibona/FerryNotifier
 After=network.target
 Wants=network-online.target
@@ -17,11 +17,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 
-# User and group to run as (create a dedicated service account)
-User=ferrynotifier
-Group=ferrynotifier
+# User and group to run as (adjust as needed)
+User=www-data
+Group=www-data
 
-# Working directory
+# Working directory (adjust to your installation path)
 WorkingDirectory=/opt/FerryNotifier/web
 
 # Environment variables
@@ -50,7 +50,7 @@ StartLimitBurst=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-only
+ProtectHome=true
 ReadWritePaths=/var/log/ferrynotifier
 
 # Resource limits

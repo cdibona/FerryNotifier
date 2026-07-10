@@ -106,7 +106,7 @@ def send_discord_notification(endpoint: str, route_id: str, ip_address: str, use
     try:
         payload = {
             "embeds": [{
-                "title": "FerryTrmnl API Request",
+                "title": "FerryNotifier API Request",
                 "color": 3447003,  # Blue
                 "fields": [
                     {"name": "Endpoint", "value": endpoint, "inline": True},
@@ -231,7 +231,7 @@ TRMNL_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <span class="header-brand">FerryTrmnl:</span> <span class="header-route">{{ route_name }}</span>
+            <span class="header-brand">FerryNotifier:</span> <span class="header-route">{{ route_name }}</span>
         </div>
 
         {% if error %}
@@ -2654,7 +2654,7 @@ def api_info():
             "/api/info": "API information (GET)",
             "/health": "Health check endpoint"
         },
-        "documentation": "https://github.com/cdibona/FerryTrmnl"
+        "documentation": "https://github.com/cdibona/FerryNotifier"
     })
 
 
@@ -2893,7 +2893,7 @@ TRMNL_PREVIEW_TEMPLATE = """
                 {% endif %}
             </div>
         </div>
-        <div class="foot"><span>FerryTrmnl</span><span style="display:inline-flex;align-items:center;gap:6px;">Updated {{ update_date }} &middot; {{ update_time }} &middot;
+        <div class="foot"><span>FerryNotifier</span><span style="display:inline-flex;align-items:center;gap:6px;">Updated {{ update_date }} &middot; {{ update_time }} &middot;
             <span title="battery (sample)" style="display:inline-flex;align-items:center;">
                 <span style="display:inline-block;width:24px;height:11px;border:1px solid currentColor;border-radius:2px;padding:1px;box-sizing:border-box;"><span style="display:block;height:100%;background:currentColor;width:78%;"></span></span>
                 <span style="display:inline-block;width:2px;height:5px;background:currentColor;margin-left:1px;"></span>

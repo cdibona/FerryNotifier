@@ -1,11 +1,11 @@
-# Contributing to FerryTrmnl
+# Contributing to FerryNotifier
 
-Thank you for your interest in contributing to FerryTrmnl! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to FerryNotifier! This document provides guidelines and instructions for contributing to the project.
 
 ## Project Structure
 
 ```
-FerryTrmnl/
+FerryNotifier/
 ├── web/                    # Web application code
 │   ├── app.py              # Main Flask application
 │   ├── test_app.py         # Unit tests
@@ -13,7 +13,7 @@ FerryTrmnl/
 ├── deployment/             # Deployment configurations
 │   ├── Dockerfile          # Docker container definition
 │   ├── docker-compose.yml  # Docker Compose configuration
-│   ├── ferrytrmnl.service  # Systemd service file
+│   ├── ferrynotifier.service  # Systemd service file
 │   ├── nginx.conf.example  # Nginx reverse proxy config
 │   └── run.sh              # Quick-start development script
 ├── .github/
@@ -37,8 +37,8 @@ FerryTrmnl/
 
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/FerryTrmnl.git
-   cd FerryTrmnl
+   git clone https://github.com/YOUR_USERNAME/FerryNotifier.git
+   cd FerryNotifier
    ```
 
 3. Create a virtual environment:
@@ -153,7 +153,7 @@ We welcome contributions in these areas:
 
 1. **Update your fork** with the latest changes from main:
    ```bash
-   git remote add upstream https://github.com/cdibona/FerryTrmnl.git
+   git remote add upstream https://github.com/cdibona/FerryNotifier.git
    git fetch upstream
    git rebase upstream/main
    ```
@@ -228,10 +228,10 @@ Be mindful of WSDOT API rate limits during development. Consider:
 For testing Docker builds:
 ```bash
 # Build from project root
-docker build -f deployment/Dockerfile -t ferrytrmnl .
+docker build -f deployment/Dockerfile -t ferrynotifier .
 
 # Run container
-docker run -p 5050:5050 --env-file .env ferrytrmnl
+docker run -p 5050:5050 --env-file .env ferrynotifier
 ```
 
 ## Documentation
@@ -273,4 +273,4 @@ If you have questions about contributing:
 
 By contributing, you agree that your contributions will be licensed under the same license as the project (MIT License).
 
-Thank you for contributing to FerryTrmnl!
+Thank you for contributing to FerryNotifier!

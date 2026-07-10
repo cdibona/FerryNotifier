@@ -75,17 +75,17 @@ sudo apt install -y python3 python3-pip python3-venv nginx git
 Create a directory for the application:
 
 ```bash
-sudo mkdir -p /opt/FerryTrmnl
-sudo chown $USER:$USER /opt/FerryTrmnl
+sudo mkdir -p /opt/FerryNotifier
+sudo chown $USER:$USER /opt/FerryNotifier
 ```
 
 ## Step 3: Clone Repository
 
-Clone the FerryTrmnl repository:
+Clone the FerryNotifier repository:
 
 ```bash
-cd /opt/FerryTrmnl
-git clone https://github.com/cdibona/FerryTrmnl.git .
+cd /opt/FerryNotifier
+git clone https://github.com/cdibona/FerryNotifier.git .
 ```
 
 ## Step 4: Set Up Python Virtual Environment
@@ -152,46 +152,46 @@ curl http://localhost:5050/webhook
 Create log directory:
 
 ```bash
-sudo mkdir -p /var/log/ferrytrmnl
-sudo chown www-data:www-data /var/log/ferrytrmnl
+sudo mkdir -p /var/log/ferrynotifier
+sudo chown www-data:www-data /var/log/ferrynotifier
 ```
 
 Copy the systemd service file:
 
 ```bash
-sudo cp deployment/ferrytrmnl.service /etc/systemd/system/
+sudo cp deployment/ferrynotifier.service /etc/systemd/system/
 ```
 
 Edit the service file if needed (adjust paths, user, workers):
 
 ```bash
-sudo nano /etc/systemd/system/ferrytrmnl.service
+sudo nano /etc/systemd/system/ferrynotifier.service
 ```
 
 Set proper ownership:
 
 ```bash
-sudo chown -R www-data:www-data /opt/FerryTrmnl
+sudo chown -R www-data:www-data /opt/FerryNotifier
 ```
 
 Reload systemd and enable the service:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable ferrytrmnl
-sudo systemctl start ferrytrmnl
+sudo systemctl enable ferrynotifier
+sudo systemctl start ferrynotifier
 ```
 
 Check the service status:
 
 ```bash
-sudo systemctl status ferrytrmnl
+sudo systemctl status ferrynotifier
 ```
 
 View logs:
 
 ```bash
-sudo journalctl -u ferrytrmnl -f
+sudo journalctl -u ferrynotifier -f
 ```
 
 ## Step 8: Configure Nginx
@@ -199,13 +199,13 @@ sudo journalctl -u ferrytrmnl -f
 Copy the nginx configuration:
 
 ```bash
-sudo cp deployment/nginx.conf.example /etc/nginx/sites-available/ferrytrmnl
+sudo cp deployment/nginx.conf.example /etc/nginx/sites-available/ferrynotifier
 ```
 
 Edit the configuration file:
 
 ```bash
-sudo nano /etc/nginx/sites-available/ferrytrmnl
+sudo nano /etc/nginx/sites-available/ferrynotifier
 ```
 
 Replace `ferry.yourdomain.com` with your actual domain name.
@@ -221,7 +221,7 @@ sudo nginx -t
 Enable the site:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/ferrytrmnl /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/ferrynotifier /etc/nginx/sites-enabled/
 sudo systemctl reload nginx
 ```
 
@@ -277,10 +277,10 @@ curl https://ferry.yourdomain.com/api/ferry-status
 
 ```bash
 # Build the Docker image from project root
-docker build -f deployment/Dockerfile -t ferrytrmnl .
+docker build -f deployment/Dockerfile -t ferrynotifier .
 
 # Run with .env file
-docker run -p 5050:5050 --env-file .env ferrytrmnl
+docker run -p 5050:5050 --env-file .env ferrynotifier
 ```
 
 Or use docker-compose:
@@ -311,25 +311,25 @@ docker-compose logs -f
 
 ```bash
 # Systemd logs
-sudo journalctl -u ferrytrmnl -f
+sudo journalctl -u ferrynotifier -f
 
 # Application logs (if configured)
-sudo tail -f /var/log/ferrytrmnl/error.log
-sudo tail -f /var/log/ferrytrmnl/access.log
+sudo tail -f /var/log/ferrynotifier/error.log
+sudo tail -f /var/log/ferrynotifier/access.log
 ```
 
 ### View Nginx Logs
 
 ```bash
-sudo tail -f /var/log/nginx/ferrytrmnl_access.log
-sudo tail -f /var/log/nginx/ferrytrmnl_error.log
+sudo tail -f /var/log/nginx/ferrynotifier_access.log
+sudo tail -f /var/log/nginx/ferrynotifier_error.log
 ```
 
 ### Restart Services
 
 ```bash
 # Restart application
-sudo systemctl restart ferrytrmnl
+sudo systemctl restart ferrynotifier
 
 # Restart nginx
 sudo systemctl restart nginx
@@ -341,11 +341,11 @@ sudo systemctl reload nginx
 ### Update Application
 
 ```bash
-cd /opt/FerryTrmnl
+cd /opt/FerryNotifier
 git pull
 source venv/bin/activate
 pip install -r web/requirements.txt
-sudo systemctl restart ferrytrmnl
+sudo systemctl restart ferrynotifier
 ```
 
 ## CI/CD Deployment
@@ -377,7 +377,7 @@ Configure these secrets in your GitHub repository settings:
 
 Check logs:
 ```bash
-sudo journalctl -u ferrytrmnl -n 50
+sudo journalctl -u ferrynotifier -n 50
 ```
 
 Common issues:
@@ -388,7 +388,7 @@ Common issues:
 
 ### Nginx 502 Bad Gateway
 
-- Ensure ferrytrmnl service is running: `sudo systemctl status ferrytrmnl`
+- Ensure ferrynotifier service is running: `sudo systemctl status ferrynotifier`
 - Check if port 5050 is listening: `sudo netstat -tlnp | grep 5050`
 - Review nginx error logs
 
@@ -410,11 +410,11 @@ Common issues:
 
 ### Adjust Gunicorn Workers
 
-Edit `/etc/systemd/system/ferrytrmnl.service`:
+Edit `/etc/systemd/system/ferrynotifier.service`:
 
 ```ini
 # Formula: (2 x CPU cores) + 1
-ExecStart=/opt/FerryTrmnl/venv/bin/gunicorn --workers 4 ...
+ExecStart=/opt/FerryNotifier/venv/bin/gunicorn --workers 4 ...
 ```
 
 For a 2-core server: 5 workers
@@ -423,7 +423,7 @@ For a 4-core server: 9 workers
 After changes:
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl restart ferrytrmnl
+sudo systemctl restart ferrynotifier
 ```
 
 ### Nginx Caching (Optional)
@@ -432,10 +432,10 @@ Add caching to nginx configuration to reduce load on WSDOT API:
 
 ```nginx
 # Add to http block in /etc/nginx/nginx.conf
-proxy_cache_path /var/cache/nginx/ferrytrmnl levels=1:2 keys_zone=ferrytrmnl_cache:10m max_size=100m inactive=60m use_temp_path=off;
+proxy_cache_path /var/cache/nginx/ferrynotifier levels=1:2 keys_zone=ferrynotifier_cache:10m max_size=100m inactive=60m use_temp_path=off;
 
 # Add to location / block in your site config
-proxy_cache ferrytrmnl_cache;
+proxy_cache ferrynotifier_cache;
 proxy_cache_valid 200 10m;
 proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
 add_header X-Cache-Status $upstream_cache_status;
@@ -443,4 +443,4 @@ add_header X-Cache-Status $upstream_cache_status;
 
 ## Support
 
-For issues or questions, please visit the [GitHub repository](https://github.com/cdibona/FerryTrmnl).
+For issues or questions, please visit the [GitHub repository](https://github.com/cdibona/FerryNotifier).

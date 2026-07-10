@@ -1,6 +1,6 @@
-# Dockerfile for FerryTrmnl
-# Build from project root: docker build -f deployment/Dockerfile -t ferrytrmnl .
-# Run: docker run -p 5050:5050 --env-file .env ferrytrmnl
+# Dockerfile for FerryNotifier
+# Build from project root: docker build -f deployment/Dockerfile -t ferrynotifier .
+# Run: docker run -p 5050:5050 --env-file .env ferrynotifier
 
 FROM python:3.11-slim
 
@@ -36,9 +36,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY web/app.py .
 
 # Create a non-root user and a writable data dir for persisted settings
-RUN useradd -m -u 1000 ferrytrmnl && \
+RUN useradd -m -u 1000 ferrynotifier && \
     mkdir -p /app/data && \
-    chown -R ferrytrmnl:ferrytrmnl /app
+    chown -R ferrynotifier:ferrynotifier /app
 
 # Persisted settings live here. Mount a volume at /app/data to keep them across
 # updates, e.g.  -v $HOME/.ferrynotifier:/app/data  (or use deployment/update.sh).
@@ -49,7 +49,7 @@ ENV SETTINGS_PATH=/app/data/settings.json \
     ENABLE_SCHEDULER=true \
     IN_DOCKER=1
 
-USER ferrytrmnl
+USER ferrynotifier
 
 # Expose the port
 EXPOSE 5050

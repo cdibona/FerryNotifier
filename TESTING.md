@@ -1,6 +1,6 @@
-# Testing Guide for FerryTrmnl
+# Testing Guide for FerryNotifier
 
-This guide explains how to test the FerryTrmnl webhook server.
+This guide explains how to test the FerryNotifier webhook server.
 
 ## Running Tests
 
@@ -73,7 +73,7 @@ Expected response:
     "/api/ferry-status": "JSON API endpoint (GET)",
     "/health": "Health check endpoint"
   },
-  "documentation": "https://github.com/cdibona/FerryTrmnl"
+  "documentation": "https://github.com/cdibona/FerryNotifier"
 }
 ```
 
@@ -114,10 +114,10 @@ curl "http://localhost:5050/api/ferry-status?route_id=YOUR_ROUTE_ID" | jq
 
 ```bash
 # Build the Docker image from project root
-docker build -f deployment/Dockerfile -t ferrytrmnl .
+docker build -f deployment/Dockerfile -t ferrynotifier .
 
 # Run with .env file
-docker run -p 5050:5050 --env-file .env ferrytrmnl
+docker run -p 5050:5050 --env-file .env ferrynotifier
 ```
 
 Or use docker-compose:
@@ -196,20 +196,20 @@ After setting up nginx:
 curl https://ferry.yourdomain.com/health
 
 # Check nginx logs
-sudo tail -f /var/log/nginx/ferrytrmnl_access.log
+sudo tail -f /var/log/nginx/ferrynotifier_access.log
 ```
 
 ### Test Systemd Service
 
 ```bash
 # Start service
-sudo systemctl start ferrytrmnl
+sudo systemctl start ferrynotifier
 
 # Check status
-sudo systemctl status ferrytrmnl
+sudo systemctl status ferrynotifier
 
 # View logs
-sudo journalctl -u ferrytrmnl -f
+sudo journalctl -u ferrynotifier -f
 
 # Test endpoints
 curl http://localhost:5050/health
@@ -270,9 +270,9 @@ Use Trmnl's "Test Plugin" feature to verify the webhook works from their servers
 Watch for Trmnl requests:
 
 ```bash
-sudo journalctl -u ferrytrmnl -f
+sudo journalctl -u ferrynotifier -f
 # or
-sudo tail -f /var/log/ferrytrmnl/access.log
+sudo tail -f /var/log/ferrynotifier/access.log
 ```
 
 ## Troubleshooting Tests
@@ -281,13 +281,13 @@ sudo tail -f /var/log/ferrytrmnl/access.log
 
 Make sure you're in the correct directory:
 ```bash
-cd /path/to/FerryTrmnl
+cd /path/to/FerryNotifier
 python web/test_app.py
 ```
 
 Or run from the web directory:
 ```bash
-cd /path/to/FerryTrmnl/web
+cd /path/to/FerryNotifier/web
 python test_app.py
 ```
 
