@@ -1,116 +1,149 @@
 # FerryNotifier
 
-A Washington State Ferry status display plugin for [Trmnl](https://usetrmnl.com/) e-ink displays. This webhook server fetches real-time ferry status information from the WSDOT Ferries API and displays it on your Trmnl device.
+Real-time [Washington State Ferry](https://www.wsdot.wa.gov/ferries/) status on your
+[TRMNL](https://usetrmnl.com/) e-ink display and/or [Vestaboard](https://www.vestaboard.com/)
+split-flap board. FerryNotifier polls the WSDOT Ferries API, renders the next departure,
+drive-up space, and delays, and pushes them to your devices on a schedule — all from a
+small self-hosted web control panel.
 
-## Features
+<!-- Add a screenshot here, e.g. ![Control panel](assets/screenshot.png) -->
 
-- **Real-time Ferry Status**: Displays current vessel locations and status
-- **Route Information**: Shows specific ferry route details
-- **Upcoming Departures**: Lists next departures for your chosen route
-- **E-ink Optimized**: Display formatted for e-ink screens with clear, readable text
-- **REST API**: Provides both HTML webhook and JSON API endpoints
-- **Vestaboard Support**: Optionally push ferry status to a Vestaboard / Vestaboard Note split-flap display
-- **Production Ready**: Designed to run behind nginx with systemd service management
-- **CI/CD Ready**: Includes GitHub Actions workflows for automated testing and deployment
+- 🚢 Next departure, drive-up spaces, and delay alerts for any WSDOT route
+- 🖥️ Push to **TRMNL** (webhook or polling) and **Vestaboard** / Vestaboard Note
+- ⏰ Background scheduler with per-device intervals, quiet hours, and sleep messages
+- 🎛️ Web control panel — configure everything in the browser, no redeploys
+- 🐳 One-command Docker image, settings persisted on a mounted volume
 
-## Project Structure
+---
 
-```
-FerryNotifier/
-├── web/                    # Web application code
-│   ├── app.py              # Main Flask application
-│   ├── test_app.py         # Unit tests
-│   └── requirements.txt    # Python dependencies
-├── deployment/             # Deployment configurations
-│   ├── Dockerfile          # Docker container definition
-│   ├── docker-compose.yml  # Docker Compose configuration
-│   ├── ferrynotifier.service  # Systemd service file
-│   ├── nginx.conf.example  # Nginx reverse proxy config
-│   └── run.sh              # Quick-start development script
-├── .github/
-│   └── workflows/          # GitHub Actions CI/CD
-│       └── deploy.yml      # Deployment workflow
-├── .env.template           # Environment variables template
-├── .gitignore              # Git ignore rules
-├── .dockerignore           # Docker ignore rules
-├── LICENSE                 # MIT License
-├── README.md               # This file
-├── INSTALL.md              # Installation/deployment guide
-├── TESTING.md              # Testing guide
-└── CONTRIBUTING.md         # Contribution guidelines
+## Quick start (Docker)
+
+You need a free **WSDOT Ferries API key** — request one (it arrives by email) at
+<https://wsdot.wa.gov/traffic/api/>.
+
+```bash
+docker run -d --name ferrynotifier -p 5050:5050 \
+  -e WSDOT_API_KEY=your_key_here \
+  -v "$HOME/.ferrynotifier:/app/data" \
+  ghcr.io/cdibona/ferrynotifier:latest
 ```
 
-## Quick Start
+Then open the control panel at **<http://localhost:5050/>** and:
 
-### Prerequisites
+1. Pick a **route** and **direction**, and preview how it looks on TRMNL / Vestaboard.
+2. Add a **device target** (a TRMNL webhook URL or a Vestaboard Read/Write key).
+3. Turn on **Auto-push** — the built-in scheduler keeps the device updated.
 
-- Python 3.8 or higher
-- WSDOT Ferries API key (free from [WSDOT](https://www.wsdot.wa.gov/traffic/api/))
-- A Trmnl device or account
+> **Why the `-v` mount?** All your settings (targets, keys, schedules, capture
+> history) live in `/app/data`. Bind-mounting `$HOME/.ferrynotifier` keeps them on
+> the host so they **survive updates**. Update later with
+> [`deployment/update.sh`](deployment/update.sh), which re-mounts the same directory —
+> never a bare `docker run` of a new image, which would start with an empty data dir.
 
-### Installation
+Prefer Compose? [`deployment/docker-compose.ghcr.yml`](deployment/docker-compose.ghcr.yml)
+pulls the published image and manages the volume for you:
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/cdibona/FerryNotifier.git
-   cd FerryNotifier
-   ```
+```bash
+docker compose -f deployment/docker-compose.ghcr.yml up -d
+```
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r web/requirements.txt
-   ```
+You can also skip `-e WSDOT_API_KEY` entirely and paste the key into the control
+panel — it's saved server-side with the rest of your settings.
 
-3. **Configure environment variables**:
-   ```bash
-   cp .env.template .env
-   # Edit .env with your favorite editor
-   nano .env
-   ```
+> **Keep it on a trusted network.** API keys are stored in plaintext in the data
+> volume, so run FerryNotifier on your LAN or tailnet, not the public internet.
 
-4. **Add your WSDOT API key** to the `.env` file:
-   ```bash
-   WSDOT_API_KEY=your_actual_api_key_here
-   ```
+---
 
-5. **Run the server**:
-   ```bash
-   python web/app.py
-   ```
+## Contents
 
-The server will start on `http://localhost:5050` by default.
+- [How it works](#how-it-works)
+- [The control panel](#the-control-panel)
+- [Connecting devices](#connecting-devices)
+- [Ferry routes](#ferry-routes)
+- [Configuration](#configuration)
+- [API endpoints](#api-endpoints)
+- [Other ways to run](#other-ways-to-run)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
-## Configuration
+---
 
-### Environment Variables
+## How it works
 
-Edit the `.env` file to configure the webhook server:
+FerryNotifier is a small Flask app. It fetches vessel locations, terminal sailing
+space, and service alerts from the [WSDOT Ferries API](https://www.wsdot.wa.gov/ferries/api/),
+computes the next departure and drive-up space for your chosen route + direction, and
+renders that for each device type. A background scheduler pushes to every enabled
+target on its own interval; you manage it all from the web control panel.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FLASK_HOST` | Host to bind the server to | `0.0.0.0` |
-| `FLASK_PORT` | Port to run the server on | `5050` |
-| `FLASK_DEBUG` | Enable Flask debug mode | `False` |
-| `WSDOT_API_KEY` | Your WSDOT API access key | *Required* |
-| `WSDOT_API_BASE_URL` | WSDOT API base URL | `https://www.wsdot.wa.gov/ferries/api` |
-| `FERRY_ROUTE_ID` | Specific ferry route ID (optional) | `` |
-| `TRMNL_DEVICE_ID` | Your Trmnl device ID (optional) | `` |
-| `VESTABOARD_RW_KEY` | Vestaboard Read/Write key, enables `/api/vestaboard` (optional) | `` |
-| `VESTABOARD_RW_URL` | Vestaboard Read/Write API endpoint (optional) | `https://rw.vestaboard.com/` |
+---
 
-### Getting a WSDOT API Key
+## The control panel
 
-1. Visit the [WSDOT Traveler Information API page](https://www.wsdot.wa.gov/traffic/api/)
-2. Request an API access code (it's free!)
-3. You'll receive an API key via email
-4. Add it to your `.env` file
+The root page (`/`) has two tabs — **TRMNL** and **Vestaboard** — for previewing and
+managing devices.
 
-### Available Ferry Routes
+**Targets & scheduling.** Add each device as a target (name, route, direction, and its
+webhook URL or Read/Write key). Every target has its own schedule and a **Push now**
+button. The header shows whether the scheduler is running and each target's last push.
 
-Use these route IDs when configuring your webhook URL:
+- **Vestaboard "smart" trigger** — pushes when a ferry newly docks, when drive-up
+  spaces change by more than a set % of capacity, or at least every N minutes.
+- **TRMNL "aligned" trigger** — pushes at minute 13 of the 15-minute cycle so fresh
+  data lands just before the device refreshes.
 
-| Route ID | Route Name |
-|----------|------------|
+**Quiet hours & sleep message.** Each Vestaboard can have quiet hours (e.g.
+22:00–06:00): during the window the server stops pushing updates and shows a pre-sleep
+message once — a line of text or a captured layout. Click **Read current board** to
+grab whatever is on the board and save it to that board's capture history, then pick
+any capture as the sleep message.
+
+**Persistence.** All settings are saved on the server as JSON (default
+`/app/data/settings.json`), so they survive restarts and are shared across browsers.
+Mount a volume at `/app/data` to keep them (the Docker quick-start does this).
+
+---
+
+## Connecting devices
+
+### TRMNL
+
+Create a **Private Plugin** in your [TRMNL dashboard](https://usetrmnl.com/) (needs the
+Developer perk), then choose a strategy:
+
+- **Webhook** (works on a private/tailnet server): copy the webhook URL TRMNL gives you,
+  add it as a TRMNL target in the control panel, and enable Auto-push. The server pushes
+  to it. TRMNL rate-limits webhooks to once per 5 minutes, so intervals are floored at 5 min.
+- **Polling** (needs a publicly reachable server): point a Polling plugin at
+  `http://<your-host>:5050/api/trmnl?route_id=sea-bi&direction=Seattle`.
+
+For the plugin **markup**, the control panel's TRMNL tab shows ready-to-paste blocks —
+one per layout (Full / Half Horizontal / Half Vertical / Quadrant), each sized for that
+screen — with Copy buttons and step-by-step instructions. The same templates live in
+[`assets/trmnl-markup.liquid`](assets/trmnl-markup.liquid).
+
+> TRMNL renders each layout at its own size and **crops** oversized content, so paste
+> the per-layout blocks into their matching tabs rather than relying on one template for
+> all sizes.
+
+### Vestaboard
+
+On the Vestaboard tab, add a board with its name, model (**Flagship** 6×22 or **Note**
+3×15), route, direction, and Read/Write key (from the Vestaboard app or
+[web.vestaboard.com](https://web.vestaboard.com)). The preview renders live; enable
+Auto-push to keep it updated.
+
+---
+
+## Ferry routes
+
+Use these route IDs when configuring a target or a polling URL:
+
+| Route ID | Route |
+|----------|-------|
 | `sea-bi` | Seattle / Bainbridge Island |
 | `sea-br` | Seattle / Bremerton |
 | `ed-king` | Edmonds / Kingston |
@@ -122,590 +155,154 @@ Use these route IDs when configuring your webhook URL:
 | `pd-tal` | Pt. Defiance / Tahlequah |
 | `ana-sj` | Anacortes / San Juan Islands |
 
-**Example**: To show Seattle/Bainbridge ferries, use:
-```
-https://your-domain.com/webhook?route_id=sea-bi
-```
+---
 
-## Control Panel
+## Configuration
 
-The root page (`/`) is a control panel for previewing, scheduling, and pushing
-ferry status to your devices. It has two tabs:
+Most settings are managed in the control panel and saved to the data volume. For the
+few that are process-level, set environment variables (via `-e`, `--env-file .env`, or
+Compose). Copy [`.env.template`](.env.template) to `.env` to start from a documented set.
 
-- **TRMNL** — preview how the status renders on a TRMNL e-ink display, and manage
-  **webhook push targets** (see below).
-- **Vestaboard** — preview the split-flap layout (6×22 Flagship or 3×15 Note) and
-  manage one or more boards.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `WSDOT_API_KEY` | WSDOT Ferries API key (can also be entered in the UI) | *required* |
+| `FLASK_HOST` | Bind address | `0.0.0.0` |
+| `FLASK_PORT` | Port | `5050` |
+| `ENABLE_SCHEDULER` | Run the background push scheduler | `true` (in Docker) |
+| `WSDOT_CACHE_SECONDS` | Min seconds between WSDOT polls per route | `300` |
+| `SETTINGS_PATH` | Where settings JSON is stored | `/app/data/settings.json` |
+| `VESTABOARD_RW_KEY` | Default Vestaboard Read/Write key (optional) | `` |
+| `DISCORD_WEBHOOK_URL` | If set, logs each API request (caller IP + user-agent) to Discord (optional) | `` |
 
-**Targets & scheduling.** Add each device as a target — a Vestaboard (name, model,
-route, direction, Read/Write key) or a TRMNL device (name, route, direction,
-webhook URL). Each target has its own **schedule** and a **Push now** button. A
-background scheduler pushes every enabled target on its interval; the header shows
-whether it's running and each target's last-push status.
+See `.env.template` for the full list, including Let's Encrypt and site-URL options
+used by the from-source deployment.
 
-- **Vestaboard "smart" trigger** — pushes when a ferry newly docks, when drive-up
-  spaces change by more than a set % of capacity, or at least every N minutes.
-- **TRMNL "aligned" trigger** — pushes at minute 13 of the 15-minute cycle so fresh
-  data lands just before the device refreshes.
+---
 
-**Quiet hours & sleep message.** Each Vestaboard can have **quiet hours** (e.g.
-22:00–06:00): during the window the server stops pushing ferry updates and shows a
-**pre-sleep message** once — either a line of text or a **captured layout**. Click
-**Read current board** to grab whatever is currently on the board (via the
-Read/Write API's read), which is saved to that board's capture **history**; pick any
-capture and "Use as sleep message".
+## API endpoints
 
-**Persistence.** All settings — WSDOT key, targets, keys, and schedules — are saved
-**on the server** as JSON (default `/app/data/settings.json`), so they survive
-restarts and are shared across browsers. Mount a volume at `/app/data` (the
-Compose files do this by default) to keep them. Because keys are stored in
-plaintext, keep this server on a trusted network (e.g. tailnet-only), not the
-public internet.
+| Endpoint | Description |
+|----------|-------------|
+| `GET /` | Control panel (HTML) |
+| `GET /api/trmnl?route_id=&direction=` | JSON payload for TRMNL polling plugins |
+| `GET /api/ferry-status?route_id=` | Raw ferry status JSON |
+| `GET\|POST /api/vestaboard?route_id=` | Push current status to a Vestaboard (`preview=1` returns the character grid without sending) |
+| `GET /webhook?route_id=` | E-ink-formatted HTML |
+| `GET /health` | Health check |
 
-### Pushing to TRMNL
+Per-request overrides `wsdot_key`, `vestaboard_key`, and `vestaboard_url` (query string
+or JSON body) let the UI test with keys entered in the browser.
 
-TRMNL normally *polls* your server (point a Polling plugin at `/api/trmnl`). To
-have the server **push** on a schedule instead, create a **Webhook** Private
-Plugin in your [TRMNL dashboard](https://usetrmnl.com/), paste its webhook URL
-into a TRMNL target, and enable a schedule. TRMNL rate-limits webhooks to once
-every 5 minutes, so intervals are floored at 5 min.
-
-## API Endpoints
-
-### `GET /webhook`
-
-Main webhook endpoint for Trmnl. Returns HTML formatted for e-ink display.
-
-**Query Parameters**:
-- `route_id` (optional): Specific ferry route to display
-
-**Example**:
 ```bash
-curl http://localhost:5050/webhook
-```
+# JSON for a TRMNL polling plugin
+curl "http://localhost:5050/api/trmnl?route_id=sea-bi&direction=Seattle"
 
-### `GET /api/ferry-status`
-
-JSON API endpoint returning raw ferry status data.
-
-**Query Parameters**:
-- `route_id` (optional): Specific ferry route to query
-
-**Example**:
-```bash
-curl http://localhost:5050/api/ferry-status
-```
-
-**Response**:
-```json
-{
-  "vessels": [...],
-  "route_info": {...},
-  "timestamp": "2024-01-15T10:30:00"
-}
-```
-
-### `GET|POST /api/vestaboard`
-
-Pushes the current ferry status to a [Vestaboard](https://www.vestaboard.com/)
-(or Vestaboard Note) device, laid out on the 6-row × 22-column split-flap grid.
-
-Requires a Read/Write API key — either `VESTABOARD_RW_KEY` in `.env` or a
-`vestaboard_key` supplied per request (see below). Get one from the Vestaboard
-app or [web.vestaboard.com](https://web.vestaboard.com). Trigger it from a cron
-job, a button, or any scheduler you like.
-
-**Parameters** (query string, or JSON body on `POST`):
-- `route_id` (optional): Specific ferry route to display
-- `preview` (optional): If truthy (`1`/`true`/`yes`), returns the character grid
-  as JSON **without** pushing to the board — handy for testing the layout
-- `wsdot_key` (optional): Override the WSDOT API key for this request
-- `vestaboard_key` (optional): Override the Vestaboard Read/Write key
-- `vestaboard_url` (optional): Override the Read/Write API endpoint
-
-The `wsdot_key` override is also accepted by `POST /api/trmnl/preview`. These
-overrides are what the web simulator uses to test with keys entered in the
-browser.
-
-**Example**:
-```bash
-# Push live status to the board
-curl -X POST "http://localhost:5050/api/vestaboard?route_id=sea-bi"
-
-# Preview the grid without sending
+# Preview a Vestaboard grid without sending
 curl "http://localhost:5050/api/vestaboard?route_id=sea-bi&preview=true"
 ```
 
-**Response**:
-```json
-{
-  "status": "sent",
-  "sent": true,
-  "characters": [[0, 0, ...], ...]
-}
-```
+---
 
-### `GET /health`
+## Other ways to run
 
-Health check endpoint for monitoring.
+### Pre-built image (GHCR)
 
-**Example**:
-```bash
-curl http://localhost:5050/health
-```
-
-### `GET /`
-
-Root endpoint providing service information and available endpoints.
-
-## Trmnl Plugin Configuration
-
-This section provides detailed instructions for configuring FerryNotifier as a plugin in the Trmnl dashboard.
-
-### Step 1: Deploy Your Webhook Server
-
-Before configuring Trmnl, you need your FerryNotifier server running and accessible from the internet:
-
-1. Deploy to a server with a public IP or domain name
-2. Set up HTTPS using Let's Encrypt (see [INSTALL.md](INSTALL.md))
-3. Verify your webhook is accessible: `curl https://your-domain.com/webhook`
-
-### Step 2: Log in to Trmnl Dashboard
-
-1. Go to [usetrmnl.com](https://usetrmnl.com/) and log in to your account
-2. Navigate to your device dashboard
-
-### Step 3: Create a New Private Plugin
-
-1. Click on **"Plugins"** in the left sidebar
-2. Click **"Create New Plugin"** or **"Add Plugin"**
-3. Select **"Private Plugin"** (for custom polling plugins)
-
-### Step 4: Configure Plugin Settings
-
-Fill in the following fields:
-
-| Setting | Value | Notes |
-|---------|-------|-------|
-| **Plugin Name** | `Washington State Ferries` | Or any name you prefer |
-| **Strategy** | `Polling` | TRMNL fetches JSON data from your server |
-| **Polling URL** | `https://your-domain.com/api/trmnl?route_id=sea-bi` | Use `/api/trmnl` endpoint |
-| **Polling Verb** | `GET` | |
-| **Polling Headers** | *(leave empty)* | No authentication required |
-| **Refresh Rate** | `15 minutes` | Recommended: 15-30 minutes |
-
-**Note:** Use the `/api/trmnl` endpoint (returns JSON), not `/webhook` (returns HTML).
-
-### Step 5: Configure Polling URL with Route
-
-**Polling URL Examples:**
-
-| Route | Polling URL |
-|-------|-------------|
-| Seattle / Bainbridge | `https://your-domain.com/api/trmnl?route_id=sea-bi` |
-| Seattle / Bremerton | `https://your-domain.com/api/trmnl?route_id=sea-br` |
-| Edmonds / Kingston | `https://your-domain.com/api/trmnl?route_id=ed-king` |
-| Mukilteo / Clinton | `https://your-domain.com/api/trmnl?route_id=muk-cl` |
-| Fauntleroy / Vashon | `https://your-domain.com/api/trmnl?route_id=f-v-s` |
-| Fauntleroy / Southworth | `https://your-domain.com/api/trmnl?route_id=f-s` |
-| Southworth / Vashon | `https://your-domain.com/api/trmnl?route_id=s-v` |
-| Port Townsend / Coupeville | `https://your-domain.com/api/trmnl?route_id=pt-key` |
-| Pt. Defiance / Tahlequah | `https://your-domain.com/api/trmnl?route_id=pd-tal` |
-| Anacortes / San Juan Islands | `https://your-domain.com/api/trmnl?route_id=ana-sj` |
-
-### Step 6: Add Markup Templates
-
-In TRMNL's **Markup Editor**, you'll see tabs for different layout sizes. Paste the appropriate template into each tab:
-
-**Important:** Do NOT include `<div class="view view--full">` wrapper - TRMNL adds this automatically.
-
-#### Full Layout Tab
-
-```liquid
-<div class="layout">
-  <div class="columns">
-    <div class="column">
-      <span class="title title--large">{{ route_name }}</span>
-      {% for vessel in vessels %}
-      <div class="content" style="margin-top: 12px; padding: 8px; border: 2px solid #000;">
-        <span class="title">{{ vessel.name }}</span>
-        <span class="label">{{ vessel.status }}</span>
-        <p style="margin-top: 4px;">{{ vessel.location }}</p>
-      </div>
-      {% endfor %}
-      <div class="content" style="margin-top: 12px;">
-        <span class="label">
-          {% for space in terminal_spaces %}
-          {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
-          {% endfor %}
-        </span>
-      </div>
-    </div>
-  </div>
-</div>
-<div class="title_bar">
-  <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
-</div>
-```
-
-#### Half Horizontal Layout Tab
-
-```liquid
-<div class="layout">
-  <span class="title">{{ route_name }}</span>
-  {% for vessel in vessels %}
-  <div class="content">
-    <span class="label">{{ vessel.name }} - {{ vessel.status }} - {{ vessel.location }}</span>
-  </div>
-  {% endfor %}
-  <span class="label label--small">{% for space in terminal_spaces %}{{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}{% endfor %}</span>
-</div>
-<div class="title_bar">
-  <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
-</div>
-```
-
-#### Half Vertical Layout Tab
-
-```liquid
-<div class="layout">
-  <div class="columns">
-    <div class="column">
-      <span class="title title--small">{{ route_name }}</span>
-      {% for vessel in vessels %}
-      <div class="content" style="margin-top: 6px; padding: 6px; border: 1px solid #000;">
-        <span class="label">{{ vessel.name }}</span>
-        <span class="label label--small">{{ vessel.status }}</span>
-        <p>{{ vessel.location }}</p>
-      </div>
-      {% endfor %}
-      <div class="content" style="margin-top: 6px;">
-        <span class="label label--small">
-          {% for space in terminal_spaces %}
-          {{ space[0] }}: {{ space[1].drive_up }} spots{% unless forloop.last %} | {% endunless %}
-          {% endfor %}
-        </span>
-      </div>
-    </div>
-  </div>
-</div>
-<div class="title_bar">
-  <span class="title">FerryNotifier</span>
-  <span class="instance">{{ update_time }}</span>
-</div>
-```
-
-#### Quadrant Layout Tab
-
-```liquid
-<div class="layout">
-  <div class="columns">
-    <div class="column">
-      <span class="label">{{ route_name }}</span>
-      {% for vessel in vessels %}
-      <div class="content" style="margin-top: 4px; padding: 4px; border: 1px solid #000;">
-        <span class="label label--small">{{ vessel.name }}</span>
-        <span class="label label--small">{{ vessel.status }}</span>
-        <p>{{ vessel.location }}</p>
-      </div>
-      {% endfor %}
-      <span class="label label--small" style="margin-top: 4px;">
-        {% for space in terminal_spaces %}
-        {{ space[0] }}: {{ space[1].drive_up }}{% unless forloop.last %} | {% endunless %}
-        {% endfor %}
-      </span>
-    </div>
-  </div>
-</div>
-<div class="title_bar">
-  <span class="title">Ferry</span>
-</div>
-```
-
-All templates are also available in [`assets/trmnl-markup.liquid`](assets/trmnl-markup.liquid).
-
-### Step 7: Save and Test
-
-1. Click **"Save"** to create/update the plugin
-2. Click **"Force Refresh"** or **"Test Plugin"** to fetch new data
-3. Click **"Preview"** to verify the display looks correct
-
-### Step 8: Assign to Device
-
-1. Go to your device settings
-2. Add the new plugin to your device's playlist
-3. Configure the display duration and position
-
-### Step 9: Verify Display
-
-1. Wait for the next refresh cycle (or force a refresh on your device)
-2. Verify the ferry status displays correctly on your Trmnl e-ink screen
-
-### Troubleshooting Trmnl Integration
-
-**"Full view not available" error:**
-- This means the Markup Editor's **Full** layout tab is empty or has invalid markup
-- Go to your plugin settings and click on the **"Full"** tab in the Markup Editor
-- Paste the Liquid template for Full Layout above
-- Click **Save**, then **Force Refresh**
-
-**Plugin shows "Error" or blank screen:**
-- Verify your polling URL is accessible from the internet
-- Check that HTTPS is properly configured
-- Test the URL manually: `curl https://your-domain.com/api/trmnl?route_id=sea-bi`
-- Check server logs for errors
-
-**Data not updating:**
-- Verify the polling interval is set correctly
-- Click **"Force Refresh"** in TRMNL to manually fetch new data
-- Check that your WSDOT API key is valid
-- Review server logs for API errors
-
-**Display formatting issues:**
-- Make sure you're using the Liquid templates from this README
-- Templates use TRMNL's native CSS classes for proper e-ink rendering
-
-## Production Deployment
-
-### Running with Gunicorn
-
-For production, use Gunicorn instead of the Flask development server:
-
-```bash
-cd web
-gunicorn -w 4 -b 0.0.0.0:5050 app:app
-```
-
-### Docker Deployment
-
-Build and run with Docker:
-
-```bash
-# Build from project root
-docker build -f deployment/Dockerfile -t ferrynotifier .
-
-# Run with a persistent data dir so targets/keys/schedules survive updates
-docker run -p 5050:5050 --env-file .env -v "$HOME/.ferrynotifier:/app/data" ferrynotifier
-```
-
-Or use docker-compose (mounts the `ferry-data` volume for you):
-
-```bash
-cd deployment
-docker-compose up -d
-```
-
-### ⚠️ Persistence: don't lose your settings on update
-
-All settings (targets, keys, schedules, capture history) live in `/app/data`.
-**You must bind-mount that to a host directory and reuse it every time you
-recreate the container** — otherwise a plain `docker run <newimage>` starts with
-an empty data directory and your settings are gone. The app prints a loud
-warning at startup if `/app/data` is not a mounted volume.
-
-The safe way to update is `deployment/update.sh`, which always re-mounts the
-same host directory (`$HOME/.ferrynotifier` by default):
-
-```bash
-./deployment/update.sh          # pulls latest, recreates the container, keeps data
-# override defaults if needed:
-FERRY_DATA=/opt/ferry-data FERRY_PORT=8080 ./deployment/update.sh
-```
-
-Or use Compose, which manages a named volume for you across updates:
-
-```bash
-cd deployment
-docker compose -f docker-compose.ghcr.yml pull
-docker compose -f docker-compose.ghcr.yml up -d
-```
-
-### Pre-built Image from GHCR
-
-Every published GitHub Release builds and pushes a container image to the
-GitHub Container Registry via `.github/workflows/publish.yml`:
+Every GitHub Release builds and pushes a container image via
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml):
 
 ```
-ghcr.io/cdibona/ferrynotifier:latest      # newest release
-ghcr.io/cdibona/ferrynotifier:0.1.0       # a specific version
+ghcr.io/cdibona/ferrynotifier:latest    # newest release
+ghcr.io/cdibona/ferrynotifier:0.8.4     # a specific version
 ```
 
-While the repository (and therefore the package) is private, authenticate to
-GHCR first with a GitHub token that has the `read:packages` scope:
+If the package is private, log in first with a token that has `read:packages`:
 
 ```bash
 echo "$GHCR_PAT" | docker login ghcr.io -u <github-username> --password-stdin
 ```
 
-Then run the published image directly:
+### Build the image yourself
 
 ```bash
-docker run -p 5050:5050 --env-file .env -v "$HOME/.ferrynotifier:/app/data" ghcr.io/cdibona/ferrynotifier:latest
-# ...and update later WITHOUT losing settings:
-./deployment/update.sh
+docker build -f deployment/Dockerfile -t ferrynotifier .
+docker run -p 5050:5050 -e WSDOT_API_KEY=your_key_here \
+  -v "$HOME/.ferrynotifier:/app/data" ferrynotifier
 ```
 
-Or with Compose (pulls instead of building):
+### From source
+
+Requires Python 3.8+.
 
 ```bash
-docker compose -f deployment/docker-compose.ghcr.yml pull
-docker compose -f deployment/docker-compose.ghcr.yml up -d
+git clone https://github.com/cdibona/FerryNotifier.git
+cd FerryNotifier
+pip install -r web/requirements.txt
+cp .env.template .env         # add your WSDOT_API_KEY
+python web/app.py             # dev server on http://localhost:5050
 ```
 
-Once the repository is made public, the package can be set to public as well
-and no login is needed to pull it.
-
-### Systemd Service
-
-Copy the systemd service file:
+For production, run behind Gunicorn + nginx and manage it with systemd. Sample
+[`deployment/ferrynotifier.service`](deployment/ferrynotifier.service),
+[`deployment/nginx.conf.example`](deployment/nginx.conf.example), and a Let's Encrypt
+helper are included — see **[INSTALL.md](INSTALL.md)** for the full walkthrough.
 
 ```bash
-sudo cp deployment/ferrynotifier.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable ferrynotifier
-sudo systemctl start ferrynotifier
+cd web && gunicorn -w 4 -b 0.0.0.0:5050 app:app
 ```
 
-### Nginx Configuration
-
-Copy and configure nginx:
+### Updating without losing settings
 
 ```bash
-sudo cp deployment/nginx.conf.example /etc/nginx/sites-available/ferrynotifier
-# Edit and replace ferry.yourdomain.com with your domain
-sudo ln -s /etc/nginx/sites-available/ferrynotifier /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
+./deployment/update.sh        # pull latest, recreate the container, keep the data volume
+# override defaults if needed:
+FERRY_DATA=/opt/ferry-data FERRY_PORT=8080 ./deployment/update.sh
 ```
 
-### SSL Certificate with Let's Encrypt
+The app prints a loud warning at startup if `/app/data` is not a mounted volume.
 
-```bash
-sudo apt-get install certbot python3-certbot-nginx
-sudo certbot --nginx -d ferry.yourdomain.com
-```
-
-## CI/CD Deployment
-
-This project includes GitHub Actions workflows for automated deployment. See `.github/workflows/deploy.yml` for the configuration.
-
-### Setting Up CI/CD
-
-1. **Configure GitHub Secrets** in your repository settings:
-   - `STAGING_HOST`: Your staging server hostname
-   - `STAGING_USER`: SSH username for staging
-   - `STAGING_SSH_KEY`: SSH private key for staging
-   - `PROD_HOST`: Your production server hostname
-   - `PROD_USER`: SSH username for production
-   - `PROD_SSH_KEY`: SSH private key for production
-   - `WSDOT_API_KEY`: Your WSDOT API key
-
-2. **Deployment Workflow**:
-   - Push to `main` branch triggers staging deployment
-   - Creating a release/tag triggers production deployment
-   - Manual deployment via GitHub Actions UI
+---
 
 ## Development
 
-### Running in Development Mode
-
 ```bash
-# Enable debug mode in .env
-FLASK_DEBUG=True
-
-# Run the development server
-python web/app.py
+pip install -r web/requirements.txt
+python -m pytest web/test_app.py      # run the tests
+FLASK_DEBUG=True python web/app.py     # hot-reload dev server
+./deployment/run.sh                    # or the quick-start script
 ```
 
-Or use the quick start script:
+Continuous integration ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the
+test suite on every push; publishing a Release builds and pushes the container image.
+See [TESTING.md](TESTING.md) for more.
 
-```bash
-./deployment/run.sh
-```
-
-### Running Tests
-
-```bash
-python web/test_app.py
-```
-
-### Testing the Webhook
-
-```bash
-# Test the HTML output
-curl http://localhost:5050/webhook
-
-# Test the JSON API
-curl http://localhost:5050/api/ferry-status | jq
-
-# Test with a specific route
-curl "http://localhost:5050/webhook?route_id=YOUR_ROUTE_ID"
-```
+---
 
 ## Troubleshooting
 
-### Common Issues
+| Symptom | Fix |
+|---------|-----|
+| **"API key not configured"** | Set `WSDOT_API_KEY` (env or UI); confirm the key is active. |
+| **"Failed to fetch ferry data"** | Check connectivity and that your WSDOT key is valid. |
+| **Settings disappear after an update** | You didn't reuse the `/app/data` mount — always update via `deployment/update.sh` or Compose. |
+| **TRMNL device shows a cropped / partial layout** | Paste the per-layout markup into each matching tab (see [Connecting devices](#connecting-devices)); re-save and force-refresh in TRMNL. |
+| **Port 5050 in use** | Change `FLASK_PORT`, or free the port. |
+| **nginx 502** | Ensure the service is running (`systemctl status ferrynotifier`) and the proxy port matches. |
 
-**"API key not configured" error**:
-- Make sure you've copied `.env.template` to `.env`
-- Verify your `WSDOT_API_KEY` is set correctly in `.env`
-- Ensure the `.env` file is in the project root directory
+Logs: `docker logs -f ferrynotifier` (Docker) or `journalctl -u ferrynotifier -f` (systemd).
 
-**"Failed to fetch ferry data" error**:
-- Check your internet connection
-- Verify your WSDOT API key is valid and active
-- Check WSDOT API status at their website
-
-**Port 5050 already in use**:
-- Change `FLASK_PORT` in your `.env` file to a different port
-- Or stop the process using port 5050: `sudo lsof -ti:5050 | xargs kill -9`
-
-**Nginx 502 Bad Gateway**:
-- Ensure the Flask/Gunicorn service is running: `sudo systemctl status ferrynotifier`
-- Check that the port in nginx config matches your Flask port
-- Review logs: `sudo journalctl -u ferrynotifier -f`
-
-### Logs
-
-View application logs:
-
-```bash
-# If running with systemd
-sudo journalctl -u ferrynotifier -f
-
-# If running directly
-# Logs will appear in the terminal
-```
-
-View nginx logs:
-
-```bash
-sudo tail -f /var/log/nginx/ferrynotifier_error.log
-sudo tail -f /var/log/nginx/ferrynotifier_access.log
-```
+---
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-This project is open source and available under the MIT License.
+MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-- WSDOT for providing the Ferries API
-- Trmnl for their e-ink display platform
-- The Washington State Ferry system for their excellent service
-
-## Support
-
-For issues, questions, or contributions, please visit the [GitHub repository](https://github.com/cdibona/FerryNotifier).
-
-## Related Links
-
-- [WSDOT Traveler Information API](https://www.wsdot.wa.gov/traffic/api/)
-- [Trmnl Platform](https://usetrmnl.com/)
-- [Washington State Ferries](https://www.wsdot.wa.gov/ferries/)
+- [WSDOT](https://www.wsdot.wa.gov/ferries/api/) for the Ferries API
+- [TRMNL](https://usetrmnl.com/) for the e-ink platform
+- [Vestaboard](https://www.vestaboard.com/) for the split-flap API
+- The Washington State Ferry system for getting us across the water
