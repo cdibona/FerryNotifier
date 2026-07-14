@@ -23,10 +23,15 @@ You need a free **WSDOT Ferries API key** — request one (it arrives by email) 
 
 ```bash
 docker run -d --name ferrynotifier -p 5050:5050 \
+  --restart unless-stopped \
   -e WSDOT_API_KEY=your_key_here \
   -v "$HOME/.ferrynotifier:/app/data" \
   ghcr.io/cdibona/ferrynotifier:latest
 ```
+
+`--restart unless-stopped` brings the container back automatically after a crash
+or a host reboot (as long as Docker itself starts on boot — see
+[Running it as a service](#running-it-as-a-service)).
 
 Then open the control panel at **<http://localhost:5050/>** and:
 
@@ -63,6 +68,7 @@ panel — it's saved server-side with the rest of your settings.
 - [Ferry routes](#ferry-routes)
 - [Configuration](#configuration)
 - [API endpoints](#api-endpoints)
+- [Running it as a service](#running-it-as-a-service)
 - [Other ways to run](#other-ways-to-run)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
@@ -203,6 +209,57 @@ curl "http://localhost:5050/api/vestaboard?route_id=sea-bi&preview=true"
 
 ---
 
+## Running it as a service
+
+FerryNotifier is meant to run unattended, so make sure it comes back on its own
+after a crash or a machine reboot.
+
+**Docker.** Run the container with `--restart unless-stopped` (the quick-start
+command, the Compose file, and `deployment/update.sh` all do this). The container
+then restarts automatically — *provided the Docker daemon itself starts on boot:*
+
+```bash
+sudo systemctl enable --now docker      # start Docker at boot
+docker update --restart unless-stopped ferrynotifier   # apply the policy to an existing container
+```
+
+Verify both after setup (and after any reboot):
+
+```bash
+systemctl is-enabled docker             # -> enabled
+docker inspect -f '{{.State.Status}} {{.HostConfig.RestartPolicy.Name}}' ferrynotifier
+# -> running unless-stopped
+```
+
+> `unless-stopped` restarts the container on boot **unless you stopped it by hand**
+> (`docker stop`). If you'd rather it always come back even after a manual stop,
+> use `--restart always` instead.
+
+**From source (systemd).** Use the bundled unit so systemd starts the app at boot
+and restarts it on failure:
+
+```bash
+sudo cp deployment/ferrynotifier.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ferrynotifier
+systemctl status ferrynotifier
+```
+
+**Exposing it over HTTPS.** To reach the panel from other machines without putting
+it on the public internet, front it with your own reverse proxy — e.g. a
+[Tailscale](https://tailscale.com/) tailnet:
+
+```bash
+sudo tailscale serve --bg --https=8443 http://127.0.0.1:5050
+```
+
+`tailscale serve` persists its config and is restored by `tailscaled` on boot, so
+the HTTPS endpoint comes back automatically along with the container. For a public
+deployment, use the nginx + Let's Encrypt setup in **[INSTALL.md](INSTALL.md)**
+instead.
+
+---
+
 ## Other ways to run
 
 ### Pre-built image (GHCR)
@@ -225,7 +282,8 @@ echo "$GHCR_PAT" | docker login ghcr.io -u <github-username> --password-stdin
 
 ```bash
 docker build -f deployment/Dockerfile -t ferrynotifier .
-docker run -p 5050:5050 -e WSDOT_API_KEY=your_key_here \
+docker run -d --name ferrynotifier -p 5050:5050 --restart unless-stopped \
+  -e WSDOT_API_KEY=your_key_here \
   -v "$HOME/.ferrynotifier:/app/data" ferrynotifier
 ```
 
@@ -284,6 +342,7 @@ See [TESTING.md](TESTING.md) for more.
 | **"API key not configured"** | Set `WSDOT_API_KEY` (env or UI); confirm the key is active. |
 | **"Failed to fetch ferry data"** | Check connectivity and that your WSDOT key is valid. |
 | **Settings disappear after an update** | You didn't reuse the `/app/data` mount — always update via `deployment/update.sh` or Compose. |
+| **Container doesn't come back after a reboot** | Run it with `--restart unless-stopped` and enable Docker at boot: `sudo systemctl enable docker`. (A hand `docker stop` disables auto-restart until you start it again.) |
 | **TRMNL device shows a cropped / partial layout** | Paste the per-layout markup into each matching tab (see [Connecting devices](#connecting-devices)); re-save and force-refresh in TRMNL. |
 | **Port 5050 in use** | Change `FLASK_PORT`, or free the port. |
 | **nginx 502** | Ensure the service is running (`systemctl status ferrynotifier`) and the proxy port matches. |
