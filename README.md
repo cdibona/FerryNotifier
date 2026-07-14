@@ -269,7 +269,7 @@ Every GitHub Release builds and pushes a container image via
 
 ```
 ghcr.io/cdibona/ferrynotifier:latest    # newest release
-ghcr.io/cdibona/ferrynotifier:0.8.4     # a specific version
+ghcr.io/cdibona/ferrynotifier:0.8.5     # a specific version
 ```
 
 If the package is private, log in first with a token that has `read:packages`:
