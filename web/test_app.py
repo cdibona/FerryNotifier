@@ -321,6 +321,123 @@ def test_direction_status_and_layout():
     assert st2["delay"] is None
 
 
+def _vb_text(grid):
+    """Decode a Vestaboard grid back to a list of trimmed row strings."""
+    import app
+    codes = {v: k for k, v in app.VB_CHAR_MAP.items()}
+    return [''.join(codes.get(c, ' ') for c in row).strip() for row in grid]
+
+
+def _sea_bi_fixture(delay=False):
+    """Formatted data + status for Bainbridge -> Seattle, optionally delayed."""
+    import app
+    from datetime import datetime, timedelta
+    soon = datetime.now() + timedelta(minutes=30)
+    raw = {
+        "route_name": "Seattle / Bainbridge Island", "route_id": "sea-bi",
+        "vessels": [{"VesselName": "Chimacum", "InService": True, "AtDock": True,
+                     "DepartingTerminalName": "Bainbridge Island", "ArrivingTerminalName": "Seattle"}],
+        "terminal_spaces": {"Bainbridge Island": {"drive_up": 106}},
+        "terminal_departures": {"Bainbridge Island": [
+            {"time": soon, "arrival": "Seattle", "vessel": "Wenatchee", "drive_up": 106}]},
+        "alerts": ([{"title": "Sea/BI - vessel out of service - expect delays",
+                     "route_ids": [5], "all_routes": False, "is_delay": True}] if delay else []),
+    }
+    st = app.compute_direction_status(raw, "sea-bi", "Bainbridge Island")
+    return app.format_ferry_data(raw), st
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_board_template_conditional_delay_vs_vessel():
+    """The headline example: delay text when delayed, next ship's name when not."""
+    import app
+    tpl = "{% if delay %}\nDELAYED {{ time }}\n{% else %}\n{{ vessel }}\n{% endif %}"
+
+    fd, st = _sea_bi_fixture(delay=False)
+    calm = _vb_text(app.format_vestaboard_message(fd, st, model="note", template=tpl))
+    assert calm[0] == "WENATCHEE"
+
+    fd, st = _sea_bi_fixture(delay=True)
+    late = _vb_text(app.format_vestaboard_message(fd, st, model="note", template=tpl))
+    assert late[0].startswith("DELAYED ") and late[0] != "DELAYED --"
+    # A conditional on its own line must not emit a blank row before the content.
+    assert calm[1] == "" and late[1] == ""
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_shipped_examples_fit_their_board():
+    """The one-click examples must not lose their conditional line to truncation."""
+    import app
+    for model, rows_n in (("flagship", 6), ("note", 3)):
+        tpl = app.BOARD_TEMPLATE_EXAMPLES[model]
+        fd, st = _sea_bi_fixture(delay=False)
+        calm = _vb_text(app.format_vestaboard_message(fd, st, model=model, template=tpl))
+        fd, st = _sea_bi_fixture(delay=True)
+        late = _vb_text(app.format_vestaboard_message(fd, st, model=model, template=tpl))
+        assert len(calm) == rows_n
+        assert "WENATCHEE" in calm, f"{model} example dropped the vessel line: {calm}"
+        assert any(r.startswith("DELAYED") for r in late), f"{model} example dropped the delay line: {late}"
+        # Nothing may be clipped mid-word by the column limit.
+        assert all(len(r) <= app.vb_dimensions(model)[1] for r in calm + late)
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_board_template_shape_and_alignment():
+    """One line per row, `|` splits left/right, overflow drops, short output pads."""
+    import app
+    fd, st = _sea_bi_fixture()
+
+    rows = app.format_vestaboard_message(fd, st, model="note",
+                                         template="SPACES | {{ spaces }}\n{{ origin }} TO {{ dest }}")
+    text = _vb_text(rows)
+    assert len(rows) == 3 and all(len(r) == 15 for r in rows)
+    assert text[0].startswith("SPACES") and text[0].endswith("106")   # right-aligned
+    assert text[1] == "BAIN TO SEA"
+    assert text[2] == ""                                             # padded blank row
+
+    # More lines than the board has rows: the extras are dropped, not wrapped.
+    many = app.format_vestaboard_message(fd, st, model="note", template="\n".join("R%d" % i for i in range(9)))
+    assert _vb_text(many) == ["R0", "R1", "R2"]
+
+    # Blank template falls through to the built-in layout.
+    assert app.render_board_template("  \n ", fd, st, "note") is None
+    assert app.format_vestaboard_message(fd, st, model="note", template="") == \
+           app.format_vestaboard_message(fd, st, model="note")
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_board_template_errors_and_sandbox():
+    """Broken templates show an on-board error; the sandbox blocks attribute escapes."""
+    import app
+    fd, st = _sea_bi_fixture()
+
+    broken = _vb_text(app.format_vestaboard_message(fd, st, model="flagship",
+                                                    template="{% if delay %}OOPS"))
+    assert broken[0] == "TEMPLATE ERROR"
+
+    unsafe = _vb_text(app.format_vestaboard_message(
+        fd, st, model="flagship", template="{{ ''.__class__.__mro__ }}"))
+    assert unsafe[0] == "TEMPLATE ERROR"
+
+    # An unknown variable is blank, not an error.
+    assert _vb_text(app.format_vestaboard_message(
+        fd, st, model="note", template="A{{ nope }}B"))[0] == "AB"
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_board_template_persists(tmp_path):
+    """A board's template round-trips through /api/settings and is capped."""
+    import app
+    with patch.object(app, 'SETTINGS_PATH', str(tmp_path / 's.json')):
+        client = app.app.test_client()
+        client.post('/api/settings', json={'vestaboard': {'boards': [
+            {'name': 'Hall', 'model': 'note', 'template': '{{ vessel }}'},
+            {'name': 'Big', 'template': 'X' * (app.BOARD_TEMPLATE_MAX + 500)}]}})
+        boards = client.get('/api/settings').get_json()['vestaboard']['boards']
+        assert boards[0]['template'] == '{{ vessel }}'
+        assert len(boards[1]['template']) == app.BOARD_TEMPLATE_MAX
+
+
 @patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
 def test_note_model_dimensions():
     """A Note board renders a 3x15 grid; flagship renders 6x22."""
@@ -431,6 +548,32 @@ def test_quiet_hours_window():
 
 
 @patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_quiet_hours_sleep_lead():
+    """The window opens sleep_lead_min early so the goodnight beats the board's own sleep."""
+    import app
+    from datetime import datetime
+    q = app._normalize_quiet({'enabled': True, 'start': '22:00', 'end': '06:00'})
+    assert q['sleep_lead_min'] == app.SLEEP_LEAD_DEFAULT_MIN == 3
+    assert app._in_quiet_hours(q, datetime(2026, 7, 6, 21, 57)) is True   # lead edge
+    assert app._in_quiet_hours(q, datetime(2026, 7, 6, 21, 56)) is False  # one minute earlier
+    assert app._in_quiet_hours(q, datetime(2026, 7, 6, 6, 0)) is False    # end is unshifted
+    # explicit lead, including 0 (fire exactly at the configured start)
+    q10 = app._normalize_quiet({'enabled': True, 'start': '22:00', 'end': '06:00', 'sleep_lead_min': 10})
+    assert app._in_quiet_hours(q10, datetime(2026, 7, 6, 21, 50)) is True
+    q0 = app._normalize_quiet({'enabled': True, 'start': '22:00', 'end': '06:00', 'sleep_lead_min': 0})
+    assert app._in_quiet_hours(q0, datetime(2026, 7, 6, 21, 59)) is False
+    assert app._in_quiet_hours(q0, datetime(2026, 7, 6, 22, 0)) is True
+    # a lead can't swallow the whole day: a 1438-minute window keeps one awake minute
+    wide = app._normalize_quiet({'enabled': True, 'start': '06:02', 'end': '06:00', 'sleep_lead_min': 60})
+    assert app._in_quiet_hours(wide, datetime(2026, 7, 6, 6, 0)) is False
+    assert app._in_quiet_hours(wide, datetime(2026, 7, 6, 6, 1)) is True
+    # garbage and out-of-range leads clamp
+    assert app._normalize_quiet({'sleep_lead_min': 'abc'})['sleep_lead_min'] == 3
+    assert app._normalize_quiet({'sleep_lead_min': 999})['sleep_lead_min'] == 60
+    assert app._normalize_quiet({'sleep_lead_min': -5})['sleep_lead_min'] == 0
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
 def test_scheduler_quiet_pushes_sleep_then_suppresses(tmp_path):
     import app
     from datetime import datetime
@@ -449,6 +592,30 @@ def test_scheduler_quiet_pushes_sleep_then_suppresses(tmp_path):
             with patch('app._now', return_value=datetime(2026, 7, 6, 7, 0, 0)):
                 app._scheduler_tick()
             assert ferry_m.call_count == 1  # wake push
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_scheduler_sleeps_early_by_lead(tmp_path):
+    """At start-minus-lead the sleep message goes out and ferry pushes already stop."""
+    import app
+    from datetime import datetime
+    with patch.object(app, 'SETTINGS_PATH', str(tmp_path / 's.json')), \
+         patch.object(app, 'SCHEDULE_STATE_PATH', str(tmp_path / 'st.json')):
+        client = app.app.test_client()
+        client.post('/api/settings', json={'wsdot_key': 'wk', 'vestaboard': {'boards': [{
+            'name': 'Bed', 'model': 'note', 'route': 'sea-bi', 'direction': 'Seattle', 'key': 'k',
+            'schedule': {'enabled': True, 'mode': 'interval', 'interval_min': 15},
+            'quiet': {'enabled': True, 'start': '22:00', 'end': '06:00',
+                      'sleep_lead_min': 3, 'sleep_text': 'NIGHT'}}]}})
+        with patch('app.push_sleep_message', return_value={'status': 'sent'}) as sleep_m, \
+             patch('app.push_vestaboard_target', return_value={'status': 'sent'}) as ferry_m:
+            with patch('app._now', return_value=datetime(2026, 7, 6, 21, 58, 0)):
+                app._scheduler_tick()
+            assert sleep_m.call_count == 1 and ferry_m.call_count == 0
+            # still quiet once the configured start actually arrives — no second sleep push
+            with patch('app._now', return_value=datetime(2026, 7, 6, 22, 0, 0)):
+                app._scheduler_tick()
+            assert sleep_m.call_count == 1 and ferry_m.call_count == 0
 
 
 if __name__ == '__main__':

@@ -18,6 +18,7 @@ from typing import Dict, Any, Optional
 
 import requests
 from flask import Flask, jsonify, render_template_string, request
+from jinja2.sandbox import SandboxedEnvironment
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -49,6 +50,13 @@ DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL', '')
 # The same key works for a Vestaboard Note device.
 VESTABOARD_RW_KEY = os.getenv('VESTABOARD_RW_KEY', '')
 VESTABOARD_RW_URL = os.getenv('VESTABOARD_RW_URL', 'https://rw.vestaboard.com/')
+
+# A board's own Quiet Hours (set in the Vestaboard app, and not exposed by the
+# Read/Write API) drop incoming messages, so the sleep message goes out this many
+# minutes ahead of our quiet start — while the board will still flip. Per-board
+# override: quiet.sleep_lead_min.
+SLEEP_LEAD_DEFAULT_MIN = 3
+DAY_MINUTES = 24 * 60
 
 # Build/version metadata (injected at image build time via Docker build args).
 APP_VERSION = os.getenv('APP_VERSION', 'dev')
@@ -593,6 +601,16 @@ SIMULATOR_TEMPLATE = """
         .markup-alt { margin-top: 18px; }
         .markup-alt > summary { cursor: pointer; font-size: 14px; font-weight: 600; color: #667eea; padding: 4px 0; }
         .markup-alt[open] > summary { margin-bottom: 8px; }
+        .markup-alt code { background: #f0f1f6; border-radius: 4px; padding: 1px 5px;
+            font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; color: #444; }
+        .tpl-example { background: #f6f7ff; border: 1px solid #dfe3ee; border-radius: 8px; padding: 10px 12px;
+            font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; line-height: 1.5; color: #333;
+            overflow-x: auto; margin: 0 0 12px 0; }
+        .tpl-vars { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+        .tpl-vars th { text-align: left; color: #888; font-weight: 600; border-bottom: 1px solid #e6e8ef; padding: 5px 8px 5px 0; }
+        .tpl-vars td { border-bottom: 1px solid #f0f1f5; padding: 5px 8px 5px 0; color: #555; vertical-align: top; }
+        .tpl-vars td:first-child { font-family: 'Monaco', 'Menlo', monospace; color: #333; white-space: nowrap; }
+        .tpl-vars td:last-child { color: #888; }
         .webhook-url { background: #f8f9fa; border-radius: 8px; padding: 12px; margin-top: 15px; font-family: 'Monaco', 'Menlo', monospace; font-size: 13px; color: #666; word-break: break-all; }
         .webhook-url strong { color: #333; }
 
@@ -925,6 +943,17 @@ SIMULATOR_TEMPLATE = """
                             <span class="sched-int">from <input type="time" id="beQuietStart" value="22:00" style="width:120px">
                                 to <input type="time" id="beQuietEnd" value="06:00" style="width:120px"></span>
                         </div>
+                        <div class="form-row sched-row" style="margin-top: 8px;">
+                            <span class="sched-int">Send the sleep message
+                                <input type="number" id="beSleepLead" min="0" max="60" value="3" style="width:56px"> min
+                                before that, and stop ferry pushes from then on</span>
+                        </div>
+                        <p class="hint" style="margin: 8px 0 0 0;">The board has its own Quiet Hours, which drop
+                            incoming messages and can't be read or set over the API &mdash; change those in the
+                            <a href="https://web2.vestaboard.com/" target="_blank" rel="noopener">Vestaboard web app</a>
+                            (Settings &rarr; Quiet Hours;
+                            <a href="https://www.vestaboard.com/help/quiet-hours" target="_blank" rel="noopener">help</a>).
+                            Set the lead above so the sleep message lands before that window opens.</p>
                         <div class="form-row" style="margin-top: 12px;">
                             <div class="form-group wide">
                                 <label>Pre-sleep message
@@ -940,6 +969,55 @@ SIMULATOR_TEMPLATE = """
                             <button class="btn btn-secondary" type="button" id="beUseSleepBtn" onclick="useSnapshotAsSleep()" style="display:none">Use as sleep message</button>
                         </div>
                     </div>
+
+                    <details class="markup-alt">
+                        <summary>Advanced &mdash; custom board layout</summary>
+                        <p class="hint">Leave this empty for the built-in layout. Anything here replaces it:
+                            <strong>one rendered line per board row</strong>, top to bottom. Extra lines are dropped,
+                            missing ones are left blank. A line containing <code>|</code> splits into left- and
+                            right-aligned halves; every other line is centered. Case doesn't matter (the board is
+                            all-caps) and characters outside the Vestaboard set become blanks.</p>
+                        <div class="markup-block">
+                            <div class="markup-head"><span>Layout template</span>
+                                <span><button type="button" class="btn btn-secondary" onclick="insertTemplateExample()">Insert example for this board</button>
+                                    <button type="button" class="btn btn-ghost" onclick="clearBoardTemplate()">Use built-in</button></span>
+                            </div>
+                            <textarea id="beTemplate" class="markup-ta" rows="8" oninput="previewVestaSoon()"
+                                placeholder="empty = built-in layout"></textarea>
+                        </div>
+                        <p class="hint">The board preview above updates as you type. A template that fails to render
+                            shows <strong>TEMPLATE ERROR</strong> on the preview rather than pushing a blank board.</p>
+{% raw %}
+                        <p class="hint"><strong>Conditionals.</strong> <code>{% if %}</code> / <code>{% else %}</code> /
+                            <code>{% endif %}</code> on their own lines don't produce blank rows. To show the delay when
+                            there is one and the next ship's name when there isn't:</p>
+                        <pre class="tpl-example">{% if delay %}
+DELAYED {{ time }}
+{% else %}
+{{ vessel }}
+{% endif %}</pre>
+                        <p class="hint"><strong>Filters</strong> work too: <code>{{ vessel|truncate(18, true, '') }}</code>,
+                            <code>{{ spaces|default('N/A') }}</code>. Split a row with <code>|</code> outside the braces:
+                            <code>SPACES | {{ spaces }}</code>.</p>
+{% endraw %}
+                        <table class="tpl-vars">
+                            <tr><th>Variable</th><th>Is</th><th>Example</th></tr>
+                            <tr><td>route</td><td>short route label</td><td>SEATTLE-BAINBRIDGE</td></tr>
+                            <tr><td>route_name</td><td>full route name</td><td>Seattle / Bainbridge Island</td></tr>
+                            <tr><td>origin / dest</td><td>terminal codes</td><td>SEA / BAIN</td></tr>
+                            <tr><td>origin_full / dest_full</td><td>terminal names</td><td>Seattle / Bainbridge Island</td></tr>
+                            <tr><td>time</td><td>next departure</td><td>11:30 AM</td></tr>
+                            <tr><td>time_short</td><td>next departure, compact</td><td>11:30A</td></tr>
+                            <tr><td>vessel</td><td>ship on that departure</td><td>TACOMA</td></tr>
+                            <tr><td>spaces</td><td>drive-up spaces left</td><td>142</td></tr>
+                            <tr><td>delay</td><td>delay text, or empty when on time</td><td>Vessel out of service</td></tr>
+                            <tr><td>alert</td><td>any alert, delay or not</td><td>Elevator out of service</td></tr>
+                            <tr><td>clock / clock12</td><td>time now</td><td>22:04 / 10:04P</td></tr>
+                            <tr><td>date</td><td>today</td><td>JUL 23</td></tr>
+                            <tr><td>docked</td><td>list of docked ships</td><td>CHIMACUM, TACOMA</td></tr>
+                            <tr><td>rows / cols</td><td>this board's grid</td><td>6 / 22 (Note: 3 / 15)</td></tr>
+                        </table>
+                    </details>
 
                     <div class="form-row" style="margin-top: 15px;">
                         <button class="btn btn-secondary" onclick="saveBoard()">Save Board</button>
@@ -1149,6 +1227,8 @@ SIMULATOR_TEMPLATE = """
             document.getElementById('beQuietEnabled').checked = !!q.enabled;
             document.getElementById('beQuietStart').value = q.start || '22:00';
             document.getElementById('beQuietEnd').value = q.end || '06:00';
+            document.getElementById('beSleepLead').value = (q.sleep_lead_min == null) ? 3 : q.sleep_lead_min;
+            document.getElementById('beTemplate').value = b.template || '';
             editorSleepChars = q.sleep_characters || null;
             // Show the chosen sleep content: saved text, or the decoded captured layout.
             document.getElementById('beSleepText').value = q.sleep_text || (editorSleepChars ? charsToText(editorSleepChars) : '');
@@ -1176,6 +1256,8 @@ SIMULATOR_TEMPLATE = """
             document.getElementById('beQuietEnabled').checked = false;
             document.getElementById('beQuietStart').value = '22:00';
             document.getElementById('beQuietEnd').value = '06:00';
+            document.getElementById('beSleepLead').value = 3;
+            document.getElementById('beTemplate').value = '';
             document.getElementById('beSleepText').value = '';
             editorSleepChars = null;
             updateSleepCapturedNote();
@@ -1196,10 +1278,25 @@ SIMULATOR_TEMPLATE = """
                 enabled: document.getElementById('beQuietEnabled').checked,
                 start: val('beQuietStart') || '22:00',
                 end: val('beQuietEnd') || '06:00',
+                sleep_lead_min: Math.max(0, Math.min(60, parseInt(val('beSleepLead'), 10) || 0)),
                 sleep_text: val('beSleepText'),
                 sleep_characters: editorSleepChars || null,
             };
         }
+        // ---- custom board layout template ----
+        const BOARD_TEMPLATE_EXAMPLES = {{ board_template_examples | tojson }};
+        function insertTemplateExample() {
+            const ta = document.getElementById('beTemplate');
+            if (ta.value.trim() && !confirm('Replace the current template with the example?')) return;
+            // Sized for the board being edited: the Note has 3 rows, not 6.
+            ta.value = BOARD_TEMPLATE_EXAMPLES[val('beModel') === 'note' ? 'note' : 'flagship'];
+            previewVestaSoon();
+        }
+        function clearBoardTemplate() {
+            document.getElementById('beTemplate').value = '';
+            previewVestaSoon();
+        }
+
         function updateSleepCapturedNote() {
             document.getElementById('beSleepCapturedNote').style.display = editorSleepChars ? '' : 'none';
         }
@@ -1278,10 +1375,12 @@ SIMULATOR_TEMPLATE = """
         function currentBoardConfig() {
             // Values from the open editor (covers unsaved edits), else the selected board.
             if (document.getElementById('boardEditor').style.display !== 'none') {
-                return { route: val('beRoute'), direction: val('beDir'), key: val('beKey'), url: val('beUrl'), model: val('beModel') };
+                return { route: val('beRoute'), direction: val('beDir'), key: val('beKey'), url: val('beUrl'),
+                    model: val('beModel'), template: val('beTemplate') };
             }
             const b = boardById(SETTINGS.vestaboard.selected);
-            return b ? { route: b.route, direction: b.direction, key: b.key, url: b.url, model: b.model } : { route: '', direction: '', key: '', url: '', model: 'flagship' };
+            return b ? { route: b.route, direction: b.direction, key: b.key, url: b.url, model: b.model, template: b.template || '' }
+                     : { route: '', direction: '', key: '', url: '', model: 'flagship', template: '' };
         }
         function onBoardSelect() {
             const v = document.getElementById('vbBoardSelect').value;
@@ -1318,7 +1417,7 @@ SIMULATOR_TEMPLATE = """
         }
         function boardFieldsFromForm() {
             return { name: val('beName') || 'Board', model: val('beModel') || 'flagship', route: val('beRoute'),
-                direction: val('beDir'), key: val('beKey'), url: val('beUrl'),
+                direction: val('beDir'), key: val('beKey'), url: val('beUrl'), template: val('beTemplate'),
                 schedule: boardScheduleFrom(), quiet: boardQuietFrom() };
         }
         async function saveBoard() {
@@ -1531,7 +1630,8 @@ SIMULATOR_TEMPLATE = """
         async function vestaRequest(send) {
             const btn = document.getElementById(send ? 'vbPushBtn' : 'vbPreviewBtn');
             const cfg = currentBoardConfig();
-            const body = { route_id: cfg.route, direction: cfg.direction, model: cfg.model || 'flagship', wsdot_key: SETTINGS.wsdot_key };
+            const body = { route_id: cfg.route, direction: cfg.direction, model: cfg.model || 'flagship',
+                template: cfg.template || '', wsdot_key: SETTINGS.wsdot_key };
             if (send) {
                 body.board_id = SETTINGS.vestaboard.selected || '';
                 if (cfg.key) { body.vestaboard_key = cfg.key; body.vestaboard_url = cfg.url; }
@@ -2111,9 +2211,124 @@ def _format_vestaboard_note(data, status, cols) -> list:
     return rows[:NOTE_ROWS]
 
 
+# --- Per-board layout templates ---------------------------------------------
+#
+# A board can override the built-in layout with a small Jinja template. One
+# rendered line per board row; `LEFT | RIGHT` splits a row, anything else is
+# centered. Templates are author-supplied, so they render in a sandboxed
+# environment with no filesystem or import access.
+
+BOARD_TEMPLATE_MAX = 2000
+
+# trim_blocks/lstrip_blocks so `{% if %}` tags on their own line don't each
+# emit a blank row — the single most confusing thing about writing these.
+_board_template_env = SandboxedEnvironment(
+    trim_blocks=True, lstrip_blocks=True, autoescape=False, keep_trailing_newline=False)
+
+# Offered in the UI as a starting point, per model so the conditional line still
+# fits a 3-row Note. Each also documents the syntax by example.
+BOARD_TEMPLATE_EXAMPLES = {
+    "flagship": """{{ route }}
+{{ origin }} TO {{ dest }} {{ time }}
+SPACES: {{ spaces }}
+{% if delay %}
+DELAYED {{ time }}
+{% else %}
+{{ vessel }}
+{% endif %}""",
+    "note": """{{ origin }}-{{ dest }} {{ time_short }}
+SPACES: {{ spaces }}
+{% if delay %}
+DELAYED {{ time_short }}
+{% else %}
+{{ vessel }}
+{% endif %}""",
+}
+
+
+def board_template_context(data: Dict[str, Any], status: Optional[Dict[str, Any]],
+                           model: str) -> Dict[str, Any]:
+    """
+    The variables a board layout template can use.
+
+    Everything is top-level and pre-formatted for a split-flap grid. ``delay``
+    and ``alert`` are None (not "") when absent so ``{% if delay %}`` works.
+    """
+    st = status or {}
+    rows_n, cols_n = vb_dimensions(model)
+    now = _now()
+    spaces = st.get("spaces")
+    return {
+        "route": VB_ROUTE_LABEL.get(st.get("route_id", ""), data.get("route_name", "FERRIES")),
+        "route_name": data.get("route_name", ""),
+        "origin": st.get("from_short", ""),
+        "dest": st.get("to_short", ""),
+        "origin_full": st.get("from", ""),
+        "dest_full": st.get("to", ""),
+        "time": st.get("time_str", "--"),
+        "time_short": _fmt_time_short(_departure_time_obj(status)),
+        "vessel": st.get("vessel") or "",
+        "spaces": spaces if spaces is not None else "N/A",
+        "delay": st.get("delay") or None,
+        "alert": st.get("alert") or None,
+        "clock": now.strftime("%H:%M"),
+        "clock12": _fmt_time_short(now),
+        "date": now.strftime("%b %d").upper(),
+        # `data` here is format_ferry_data() output, so match on its status text.
+        "docked": sorted(v.get("name", "") for v in data.get("vessels", [])
+                         if v.get("status") == "Docked"),
+        "error": data.get("error") or None,
+        "has_status": status is not None,
+        "rows": rows_n,
+        "cols": cols_n,
+    }
+
+
+def _template_error_grid(message: str, rows_n: int, cols_n: int) -> list:
+    """A legible on-board error so a broken template doesn't push a blank board."""
+    rows = [_vb_row(center="TEMPLATE ERROR", cols=cols_n)]
+    rows += _wrap_center_rows(re.sub(r"[^A-Za-z0-9 ]", " ", message), rows_n - 1, cols=cols_n)
+    while len(rows) < rows_n:
+        rows.append([0] * cols_n)
+    return rows[:rows_n]
+
+
+def render_board_template(template: Optional[str], data: Dict[str, Any],
+                          status: Optional[Dict[str, Any]], model: str) -> Optional[list]:
+    """
+    Render a board's layout template to a character grid.
+
+    Returns None when the template is blank, so callers fall back to the
+    built-in layout. Extra lines are dropped and short output is padded with
+    blank rows; a template that fails to render becomes an on-board error.
+    """
+    if not (template or "").strip():
+        return None
+    rows_n, cols_n = vb_dimensions(model)
+    try:
+        text = _board_template_env.from_string(template).render(
+            board_template_context(data, status, model))
+    except Exception as e:
+        logger.warning(f"Board template error: {e}")
+        return _template_error_grid(f"{type(e).__name__} {e}", rows_n, cols_n)
+
+    rows = []
+    for line in text.splitlines()[:rows_n]:
+        line = line.strip()
+        if "|" in line:
+            left, _, right = line.partition("|")
+            rows.append(_vb_row(left=left.strip(), right=right.strip(), cols=cols_n))
+        else:
+            rows.append(_vb_row(center=line, cols=cols_n))
+    while len(rows) < rows_n:
+        rows.append([0] * cols_n)
+    return rows[:rows_n]
+
+
 def format_vestaboard_message(data: Dict[str, Any],
                               status: Optional[Dict[str, Any]] = None,
-                              model: str = "flagship") -> list:
+                              model: str = "flagship",
+                              template: Optional[str] = None) -> list:
     """
     Lay ferry data out onto a Vestaboard grid, sized for the board model.
 
@@ -2123,10 +2338,16 @@ def format_vestaboard_message(data: Dict[str, Any],
             renders the focused "next departure / spaces / delay" layout for the
             chosen route + direction. Otherwise falls back to a vessel list.
         model: 'note' renders a 3x15 grid; anything else renders 6x22.
+        template: Optional per-board layout template; overrides the built-in
+            layout entirely when non-blank.
 
     Returns:
         A list of rows (3 or 6), each a list of character codes (15 or 22).
     """
+    custom = render_board_template(template, data, status, model)
+    if custom is not None:
+        return custom
+
     rows_n, cols_n = vb_dimensions(model)
     if model == "note":
         return _format_vestaboard_note(data, status, cols_n)
@@ -2354,7 +2575,8 @@ def push_vestaboard_target(board: Dict[str, Any], wsdot_key: Optional[str] = Non
     data = fetch_ferry_status(route, api_key=wsdot_key)
     status = compute_direction_status(data, route, board.get("direction")) if route else None
     formatted = format_ferry_data(data)
-    characters = format_vestaboard_message(formatted, status, model=board.get("model", "flagship"))
+    characters = format_vestaboard_message(formatted, status, model=board.get("model", "flagship"),
+                                           template=board.get("template"))
     return send_to_vestaboard(characters, key=board.get("key") or None, url=board.get("url") or None)
 
 
@@ -2471,15 +2693,20 @@ def _normalize_hhmm(value: Any, default: str) -> str:
 
 
 def _normalize_quiet(q: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Coerce a board's quiet-hours config to {enabled,start,end,sleep_text,sleep_characters}."""
+    """Coerce a board's quiet-hours config to {enabled,start,end,sleep_lead_min,sleep_text,sleep_characters}."""
     q = q or {}
     chars = q.get('sleep_characters')
     if not (isinstance(chars, list) and chars and all(isinstance(r, list) for r in chars)):
         chars = None
+    try:
+        lead = int(q.get('sleep_lead_min', SLEEP_LEAD_DEFAULT_MIN))
+    except (TypeError, ValueError):
+        lead = SLEEP_LEAD_DEFAULT_MIN
     return {
         'enabled': bool(q.get('enabled', False)),
         'start': _normalize_hhmm(q.get('start'), '22:00'),
         'end': _normalize_hhmm(q.get('end'), '06:00'),
+        'sleep_lead_min': max(0, min(60, lead)),
         'sleep_text': str(q.get('sleep_text') or '').strip()[:200],
         'sleep_characters': chars,
     }
@@ -2509,6 +2736,7 @@ def _normalize_settings(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             'model': model,
             'route': str(entry.get('route') or '').strip(),
             'direction': str(entry.get('direction') or '').strip(),
+            'template': str(entry.get('template') or '')[:BOARD_TEMPLATE_MAX],
             'schedule': _normalize_schedule(entry.get('schedule')),
             'quiet': _normalize_quiet(entry.get('quiet')),
         })
@@ -2583,6 +2811,7 @@ def _resolve_vestaboard_target() -> Dict[str, Any]:
     route = _param('route_id')
     direction = _param('direction')
     model = _param('model')
+    template = _param('template')
     board_id = _param('board_id')
 
     if board_id:
@@ -2593,6 +2822,7 @@ def _resolve_vestaboard_target() -> Dict[str, Any]:
                 route = route or board.get('route', '')
                 direction = direction or board.get('direction', '')
                 model = model or board.get('model', '')
+                template = template or board.get('template', '')
                 break
 
     return {
@@ -2601,6 +2831,7 @@ def _resolve_vestaboard_target() -> Dict[str, Any]:
         'route': route or None,
         'direction': direction or None,
         'model': model or 'flagship',
+        'template': template or None,
     }
 
 
@@ -2626,6 +2857,7 @@ def index():
         app_version=APP_VERSION,
         git_sha=GIT_SHA,
         repo_url=GITHUB_REPO_URL,
+        board_template_examples=BOARD_TEMPLATE_EXAMPLES,
         markup_shared=TRMNL_MK_SHARED,
         markup_view_stub=TRMNL_MK_VIEW_STUB,
         markup_full=TRMNL_MK_FULL,
@@ -2963,7 +3195,8 @@ def api_vestaboard():
     ferry_data = fetch_ferry_status(route_id, api_key=_effective_wsdot_key())
     status = compute_direction_status(ferry_data, route_id, direction) if route_id else None
     formatted_data = format_ferry_data(ferry_data)
-    characters = format_vestaboard_message(formatted_data, status, model=model)
+    characters = format_vestaboard_message(formatted_data, status, model=model,
+                                           template=target['template'])
     meta = {"characters": characters, "model": model, "rows": rows_n, "cols": cols_n}
 
     if preview:
@@ -3053,7 +3286,15 @@ def _aligned_due(sched: Dict[str, Any], entry: Dict[str, Any], now: datetime) ->
 
 
 def _in_quiet_hours(quiet: Dict[str, Any], now_pacific: datetime) -> bool:
-    """True if the ferry-timezone wall clock is within the board's quiet window."""
+    """
+    True if the ferry-timezone wall clock is within the board's quiet window.
+
+    The window opens ``sleep_lead_min`` minutes ahead of the configured start so
+    the sleep message lands while the board is still awake: a Vestaboard inside
+    its own (app-configured) Quiet Hours drops unforced writes, so pushing at the
+    exact start time can leave the ferry layout up all night. Ferry pushes are
+    suppressed from the same early moment, so nothing overwrites the goodnight.
+    """
     if not quiet or not quiet.get("enabled"):
         return False
     start = _normalize_hhmm(quiet.get("start"), "22:00")
@@ -3063,10 +3304,11 @@ def _in_quiet_hours(quiet: Dict[str, Any], now_pacific: datetime) -> bool:
     start_min, end_min = sh * 60 + sm, eh * 60 + em
     if start_min == end_min:
         return False
+    span = (end_min - start_min) % DAY_MINUTES          # window length
+    lead = max(0, min(60, int(quiet.get("sleep_lead_min") or 0)))
+    lead = min(lead, DAY_MINUTES - span - 1)            # never swallow the whole day
     cur = now_pacific.hour * 60 + now_pacific.minute
-    if start_min < end_min:
-        return start_min <= cur < end_min
-    return cur >= start_min or cur < end_min  # overnight wrap
+    return (cur - (start_min - lead)) % DAY_MINUTES < span + lead
 
 
 def _docked_vessel_names(data: Dict[str, Any]) -> list:
@@ -3137,7 +3379,8 @@ def _scheduler_tick() -> None:
         force_wake = False
         if is_quiet:
             if not was_quiet:
-                logger.info(f"Quiet hours begin -> sleep message on '{board['name']}'")
+                logger.info(f"Quiet hours ({quiet.get('start')} less {quiet.get('sleep_lead_min')}m lead) "
+                            f"-> sleep message on '{board['name']}'")
                 _finish_push(entry, push_sleep_message(board))
                 entry["quiet_active"] = True
                 dirty = True

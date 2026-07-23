@@ -17,18 +17,19 @@ TRMNL e-ink devices and Vestaboard split-flap displays. Public, MIT,
 
 ## Layout
 
-Almost everything is `web/app.py` (~3.3k lines), in this order:
+Almost everything is `web/app.py` (~3.5k lines), in this order:
 
 | Lines (approx) | What |
 |---|---|
 | 1–310 | config, `APP_VERSION`, timezone helpers, Discord notify |
-| 313–520 | `TRMNL_MK_*` Liquid markup constants, one per device layout |
-| 520–1630 | the control-panel HTML/CSS/JS, inline as Python strings |
-| 1634–1970 | WSDOT fetch, route/direction logic, delay parsing |
-| 1973–2290 | Vestaboard encoding, board capture history |
-| 2287–2400 | TRMNL webhook push, merge variables |
-| 2400–2980 | settings normalization/persistence, Flask routes |
-| 2980–3290 | push scheduler, quiet hours, startup persistence check |
+| 313–525 | `TRMNL_MK_*` Liquid markup constants, one per device layout |
+| 530–1855 | the control-panel HTML/CSS/JS, inline as Python strings |
+| 1860–2070 | WSDOT fetch, route/direction logic, delay parsing |
+| 2075–2210 | Vestaboard encoding, board capture history |
+| 2214–2340 | per-board layout templates (sandboxed Jinja) |
+| 2340–2610 | Vestaboard/TRMNL push, merge variables |
+| 2610–3210 | settings normalization/persistence, Flask routes |
+| 3213–3530 | push scheduler, quiet hours, startup persistence check |
 
 `assets/trmnl-markup.liquid` is a standalone copy of the markup and must be kept in sync
 with the `TRMNL_MK_*` constants when they change.
@@ -88,6 +89,23 @@ Also: **in Liquid an empty string is truthy** (only `nil`/`false` are falsy), so
 
 Vestaboard: check `vb_dimensions(model)` before assuming grid size — Note is 3 rows × 15 cols,
 Flagship is 6 × 22, and markup that fits one clips on the other.
+
+## Vestaboard quiet hours and board templates
+
+A board's own Quiet Hours (set in the Vestaboard app / web2.vestaboard.com) **drop incoming
+messages**, and the Read/Write API cannot read or set them — it only does read message, send
+message, get/set transition. So the pre-sleep message is pushed `quiet.sleep_lead_min`
+minutes (default 3) *before* our quiet window's start time, and ferry pushes stop at that
+same early moment so nothing overwrites the goodnight. `_in_quiet_hours()` implements the
+shift; the wake time is not shifted.
+
+A board can override the built-in layout with `board['template']` — a sandboxed Jinja
+template, one rendered line per board row (`LEFT | RIGHT` splits a row, anything else
+centers). Two gotchas: the env uses `trim_blocks`/`lstrip_blocks` so an `{% if %}` on its
+own line doesn't emit a blank row, and `BOARD_TEMPLATE_EXAMPLES` is **per model** because a
+6-row flagship example loses its conditional line when truncated to a 3-row Note. Anything
+new added to `board_template_context()` should be top-level and pre-formatted, and any new
+call site of `format_vestaboard_message()` must pass `template=`.
 
 ## Releases
 

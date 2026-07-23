@@ -107,6 +107,37 @@ message once — a line of text or a captured layout. Click **Read current board
 grab whatever is on the board and save it to that board's capture history, then pick
 any capture as the sleep message.
 
+The sleep message goes out a few minutes *before* the start time (3 by default,
+adjustable per board). A Vestaboard's own Quiet Hours — set in the Vestaboard app, and
+not reachable from the Read/Write API — drop incoming messages, so a goodnight pushed at
+the exact start time can be swallowed and leave the ferry layout up all night. Ferry
+pushes stop at the same early moment, so nothing overwrites the goodnight. Set the lead
+to 0 to fire exactly at the start time.
+
+**Custom board layouts.** Under **Advanced** in the board editor, a template can replace
+the built-in Vestaboard layout without touching the code. One rendered line per board row;
+a line containing `|` splits into left- and right-aligned halves, everything else is
+centered. `{% if %}` / `{% else %}` / `{% endif %}` on their own lines don't emit blank
+rows, so the bottom row can show the delay when there is one and the next ship's name when
+there isn't:
+
+```
+{{ origin }}-{{ dest }} {{ time_short }}
+SPACES: {{ spaces }}
+{% if delay %}
+DELAYED {{ time_short }}
+{% else %}
+{{ vessel }}
+{% endif %}
+```
+
+Available variables — `route`, `route_name`, `origin`, `dest`, `origin_full`, `dest_full`,
+`time`, `time_short`, `vessel`, `spaces`, `delay`, `alert`, `clock`, `clock12`, `date`,
+`docked`, `error`, `has_status`, `rows`, `cols` — are listed with examples in the UI, and
+the board preview updates as you type. Templates render in a sandbox; one that fails shows
+`TEMPLATE ERROR` on the preview instead of pushing a blank board. Leave the box empty for
+the built-in layout.
+
 **Persistence.** All settings are saved on the server as JSON (default
 `/app/data/settings.json`), so they survive restarts and are shared across browsers.
 Mount a volume at `/app/data` to keep them (the Docker quick-start does this).
