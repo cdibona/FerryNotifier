@@ -1,0 +1,49 @@
+{
+  "$comment": "Shared FerryNotifier permissions — checked in, applies to anyone working on this repo. Machine-specific grants (sudo, host paths) live in .claude/settings.local.json, which is gitignored.",
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git grep:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git fetch:*)",
+      "Bash(git tag:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git restore:*)",
+      "Bash(gh release:*)",
+      "Bash(gh run:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh auth status:*)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(ENABLE_SCHEDULER=false python3 -m pytest:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker inspect:*)",
+      "Bash(docker build:*)",
+      "Bash(docker pull:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker rm:*)",
+      "Bash(./deployment/update.sh)",
+      "Bash(curl -s http://127.0.0.1:5050/:*)",
+      "Bash(curl -s http://localhost:5050/:*)",
+      "Bash(systemctl is-enabled:*)",
+      "Bash(systemctl is-active:*)",
+      "Bash(tailscale status:*)",
+      "Bash(tailscale ip:*)",
+      "WebFetch(domain:docs.vestaboard.com)",
+      "WebFetch(domain:usetrmnl.com)",
+      "WebFetch(domain:wsdot.wa.gov)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch"
+    ],
+    "deny": [
+      "Read(./.env)"
+    ]
+  }
+}

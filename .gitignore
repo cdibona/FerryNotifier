@@ -212,3 +212,10 @@ __marimo__/
 # Persisted web UI settings (contains API keys)
 web/data/
 settings.json
+
+# Claude Code project config.
+# The bare `settings.json` rule above would otherwise swallow the shared config,
+# which IS meant to be tracked. Anything host-specific stays untracked.
+!.claude/settings.json
+.claude/settings.local.json
+.claude/CLAUDE.local.md
