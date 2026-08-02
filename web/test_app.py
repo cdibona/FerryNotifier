@@ -480,8 +480,26 @@ def test_scheduler_pushes_due_targets(tmp_path):
                                    'webhook_url': 'https://usetrmnl.com/api/custom_plugins/x',
                                    'schedule': {'enabled': True, 'interval_min': 15}}]},
         })
-        with patch('app.requests.get') as mg, patch('app.requests.post') as mp:
-            gr = MagicMock(); gr.json.return_value = []; gr.raise_for_status = MagicMock(); mg.return_value = gr
+        # A real future Seattle->Bainbridge departure, so the push isn't skipped
+        # as a WSDOT blackout (see test_ferry_data_is_stale).
+        from datetime import datetime, timedelta
+        dep_ms = int((datetime.now() + timedelta(minutes=30)).timestamp() * 1000)
+        sailing_space = [{
+            "TerminalName": "Seattle",
+            "DepartingSpaces": [{
+                "Departure": f"/Date({dep_ms}-0800)/", "VesselName": "Tacoma",
+                "SpaceForArrivalTerminals": [{
+                    "TerminalName": "Bainbridge Island", "VesselName": "Tacoma",
+                    "DriveUpSpaceCount": 90, "MaxSpaceCount": 200}],
+            }],
+        }]
+
+        def _wsdot_get(url, *a, **k):
+            r = MagicMock(); r.raise_for_status = MagicMock()
+            r.json.return_value = sailing_space if "terminalsailingspace" in url else []
+            return r
+
+        with patch('app.requests.get', side_effect=_wsdot_get) as mg, patch('app.requests.post') as mp:
             pr = MagicMock(); pr.status_code = 200; pr.content = b'{}'; pr.json.return_value = {}; pr.raise_for_status = MagicMock(); mp.return_value = pr
             app._scheduler_tick()
             posts = [c.args[0] for c in mp.call_args_list]
@@ -616,6 +634,96 @@ def test_scheduler_sleeps_early_by_lead(tmp_path):
             with patch('app._now', return_value=datetime(2026, 7, 6, 22, 0, 0)):
                 app._scheduler_tick()
             assert sleep_m.call_count == 1 and ferry_m.call_count == 0
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_ferry_data_is_stale():
+    """Only the total 'no departure AND no spaces' blackout counts as stale."""
+    import app
+    routed = {'departure_time': '2026-08-02T11:30:00', 'spaces': 100}
+    assert app._ferry_data_is_stale({'terminal_departures': {'x': [1]}}, routed) is False
+    # a real departure with unknown spaces still pushes
+    assert app._ferry_data_is_stale({}, {'departure_time': '2026-08-02T11:30:00', 'spaces': None}) is False
+    # spaces known but no next departure still pushes
+    assert app._ferry_data_is_stale({}, {'departure_time': None, 'spaces': 42}) is False
+    # the blackout: both missing -> stale
+    assert app._ferry_data_is_stale({'terminal_spaces': {}}, {'departure_time': None, 'spaces': None}) is True
+    # hard fetch error -> stale
+    assert app._ferry_data_is_stale({'error': 'boom'}, routed) is True
+    # route-less board: vessels present -> not stale; nothing -> stale
+    assert app._ferry_data_is_stale({'vessels': [{'VesselName': 'Tacoma'}]}, None) is False
+    assert app._ferry_data_is_stale({'vessels': [], 'terminal_spaces': {}}, None) is True
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_push_skips_on_stale_wsdot():
+    """A blackout read returns skipped and never touches the board."""
+    import app
+    from datetime import datetime, timedelta
+    board = {'name': 'B', 'model': 'note', 'route': 'sea-bi', 'direction': 'Bainbridge Island', 'key': 'k'}
+    empty = {'route_id': 'sea-bi', 'vessels': [], 'terminal_spaces': {}, 'terminal_departures': {}, 'alerts': []}
+    with patch('app.fetch_ferry_status', return_value=empty), \
+         patch('app.send_to_vestaboard') as send_m:
+        result = app.push_vestaboard_target(board, 'wk')
+    assert result.get('skipped') and send_m.call_count == 0
+
+    # A good read still pushes: a real departure -> send is called, no skip.
+    good = dict(empty, terminal_departures={'Bainbridge Island': [
+        {'time': datetime.now() + timedelta(minutes=20), 'arrival': 'Seattle',
+         'vessel': 'Tacoma', 'drive_up': 90}]})
+    with patch('app.fetch_ferry_status', return_value=good), \
+         patch('app.send_to_vestaboard', return_value={'status': 'sent'}) as send_ok:
+        result = app.push_vestaboard_target(board, 'wk')
+    assert 'skipped' not in result and send_ok.call_count == 1
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_trmnl_push_skips_on_stale_wsdot():
+    """A blackout read skips the TRMNL webhook too, so the device keeps its screen."""
+    import app
+    dev = {'name': 'D', 'route': 'sea-bi', 'direction': 'Bainbridge Island',
+           'webhook_url': 'https://usetrmnl.com/api/custom_plugins/x'}
+    empty = {'route_id': 'sea-bi', 'vessels': [], 'terminal_spaces': {}, 'terminal_departures': {}, 'alerts': []}
+    with patch('app.fetch_ferry_status', return_value=empty), \
+         patch('app.send_to_trmnl') as send_m:
+        result = app.push_trmnl_target(dev, 'wk')
+    assert result.get('skipped') and send_m.call_count == 0
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_scheduler_skip_keeps_last_message_and_retries(tmp_path):
+    """When WSDOT is glitching the scheduler leaves the board and retries next tick."""
+    import app
+    from datetime import datetime, timezone, timedelta
+    with patch.object(app, 'SETTINGS_PATH', str(tmp_path / 's.json')), \
+         patch.object(app, 'SCHEDULE_STATE_PATH', str(tmp_path / 'st.json')):
+        client = app.app.test_client()
+        client.post('/api/settings', json={'wsdot_key': 'wk', 'vestaboard': {'boards': [{
+            'name': 'Hall', 'model': 'note', 'route': 'sea-bi', 'direction': 'Bainbridge Island', 'key': 'k',
+            'schedule': {'enabled': True, 'mode': 'interval', 'interval_min': 15}}]}})
+        bid = client.get('/api/settings').get_json()['vestaboard']['boards'][0]['id']
+
+        # Seed a real last push an interval ago (the scheduler's interval clock is
+        # wall-clock UTC, not _now()). This is the board's last good message.
+        first_push = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        st = app._load_state()
+        st['vestaboard'][bid] = {'last_push': first_push, 'ok': True, 'message': 'sent'}
+        app._save_state(st)
+
+        # Tick with WSDOT down: push returns skipped, board left alone.
+        with patch('app.push_vestaboard_target', return_value={'skipped': 'WSDOT data unavailable'}) as skip_m:
+            app._scheduler_tick()
+        assert skip_m.call_count == 1
+        entry = app._load_state()['vestaboard'][bid]
+        # last_push did NOT advance -> the last good message sits and it stays due.
+        assert entry['last_push'] == first_push
+        assert 'skipped' in entry['message'] and entry['ok'] is True
+
+        # Next tick: WSDOT recovers -> it pushes without waiting another interval.
+        with patch('app.push_vestaboard_target', return_value={'status': 'sent'}) as back_m:
+            app._scheduler_tick()
+        assert back_m.call_count == 1
+        assert app._load_state()['vestaboard'][bid]['last_push'] != first_push
 
 
 if __name__ == '__main__':

@@ -1452,7 +1452,8 @@ DELAYED {{ time }}
             try {
                 const r = await fetch(siteBase() + '/api/push/vestaboard/' + encodeURIComponent(id), { method: 'POST' });
                 const d = await r.json();
-                setStatus('vbDot', 'vbStatus', 'vbTime', d.error ? 'error' : 'success', d.error || 'Pushed to ' + b.name);
+                if (d.skipped) setStatus('vbDot', 'vbStatus', 'vbTime', 'error', 'Skipped — ' + d.skipped + ' (board unchanged)');
+                else setStatus('vbDot', 'vbStatus', 'vbTime', d.error ? 'error' : 'success', d.error || 'Pushed to ' + b.name);
             } catch (e) { setStatus('vbDot', 'vbStatus', 'vbTime', 'error', 'Error: ' + e.message); }
             finally { btn.disabled = false; loadScheduleStatus(); }
         }
@@ -1543,7 +1544,8 @@ DELAYED {{ time }}
             try {
                 const r = await fetch(siteBase() + '/api/push/trmnl/' + encodeURIComponent(id), { method: 'POST' });
                 const j = await r.json();
-                setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', j.error ? 'error' : 'success', j.error || 'Pushed to ' + d.name);
+                if (j.skipped) setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', 'error', 'Skipped — ' + j.skipped + ' (screen unchanged)');
+                else setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', j.error ? 'error' : 'success', j.error || 'Pushed to ' + d.name);
             } catch (e) { setStatus('trmnlDot', 'trmnlStatus', 'trmnlTime', 'error', 'Error: ' + e.message); }
             finally { btn.disabled = false; loadScheduleStatus(); }
         }
@@ -2569,11 +2571,40 @@ def send_to_trmnl(webhook_url: str, merge_variables: Dict[str, Any]) -> Dict[str
         return {"error": f"Failed to send to TRMNL: {str(e)}"}
 
 
+def _ferry_data_is_stale(data: Dict[str, Any], status: Optional[Dict[str, Any]]) -> bool:
+    """
+    True when a WSDOT read came back with nothing worth showing, so a push
+    would just flip the board to a blank "-- / SPACES: N/A" state.
+
+    This happens when the ``terminalsailingspace`` fetch times out or returns
+    empty (both the departure list and the space counts come from that one
+    endpoint), or on a hard fetch error. Callers skip the push and leave the
+    board's last good message sitting until WSDOT recovers.
+    """
+    if data is None or data.get("error"):
+        return True
+    if status is not None:
+        # Routed board: only stale when BOTH the next departure and the space
+        # count are missing — the exact "BAIN-SEA --" + "SPACES: N/A" blackout.
+        # A real departure with an unknown space count still pushes.
+        return status.get("departure_time") is None and status.get("spaces") is None
+    # Route-less board (vessel-list layout): need a vessel or a space count.
+    has_vessel = any(v.get("VesselName") for v in data.get("vessels", []))
+    return not (has_vessel or data.get("terminal_spaces"))
+
+
 def push_vestaboard_target(board: Dict[str, Any], wsdot_key: Optional[str] = None) -> Dict[str, Any]:
-    """Fetch ferry data for a saved board's route/direction and push to it."""
+    """
+    Fetch ferry data for a saved board's route/direction and push to it.
+
+    Returns ``{"skipped": reason}`` without sending when WSDOT data is
+    unavailable, so a glitchy read never overwrites the board's last update.
+    """
     route = board.get("route") or None
     data = fetch_ferry_status(route, api_key=wsdot_key)
     status = compute_direction_status(data, route, board.get("direction")) if route else None
+    if _ferry_data_is_stale(data, status):
+        return {"skipped": data.get("error") or "WSDOT data unavailable"}
     formatted = format_ferry_data(data)
     characters = format_vestaboard_message(formatted, status, model=board.get("model", "flagship"),
                                            template=board.get("template"))
@@ -2605,8 +2636,20 @@ def push_sleep_message(board: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def push_trmnl_target(device: Dict[str, Any], wsdot_key: Optional[str] = None) -> Dict[str, Any]:
-    """Fetch ferry data for a TRMNL device's route/direction and push via webhook."""
-    mv = ferry_merge_variables(device.get("route") or None, device.get("direction"), wsdot_key)
+    """
+    Fetch ferry data for a TRMNL device's route/direction and push via webhook.
+
+    Like the Vestaboard path, returns ``{"skipped": reason}`` without sending
+    when WSDOT data is unavailable, so a glitch doesn't push a blank "--" screen.
+    (The fetch is cached, so the read here and inside ferry_merge_variables share
+    one WSDOT call.)
+    """
+    route = device.get("route") or None
+    data = fetch_ferry_status(route, api_key=wsdot_key)
+    status = compute_direction_status(data, route, device.get("direction")) if route else None
+    if _ferry_data_is_stale(data, status):
+        return {"skipped": data.get("error") or "WSDOT data unavailable"}
+    mv = ferry_merge_variables(route, device.get("direction"), wsdot_key)
     return send_to_trmnl(device.get("webhook_url"), mv)
 
 
@@ -3243,13 +3286,20 @@ def _save_state(state: Dict[str, Any]) -> None:
             logger.warning(f"Could not persist schedule state: {e}")
 
 
+def _result_message(result: Dict[str, Any]) -> str:
+    """Human-readable one-liner for a push result (error / skipped / sent)."""
+    if result.get("skipped"):
+        return f"skipped: {result['skipped']}"
+    return result.get("error") or result.get("status") or "sent"
+
+
 def _record_push(kind: str, target_id: str, result: Dict[str, Any]) -> None:
     """Record the outcome of a push for the admin status view (UTC timestamp)."""
     state = _load_state()
     state.setdefault(kind, {})[target_id] = {
         "last_push": datetime.now(timezone.utc).isoformat(),
         "ok": "error" not in result,
-        "message": result.get("error") or result.get("status") or "sent",
+        "message": _result_message(result),
     }
     _save_state(state)
 
@@ -3360,7 +3410,7 @@ def _scheduler_tick() -> None:
     def _finish_push(entry, result):
         entry["last_push"] = now.isoformat()
         entry["ok"] = "error" not in result
-        entry["message"] = result.get("error") or result.get("status") or "sent"
+        entry["message"] = _result_message(result)
 
     for board in settings["vestaboard"]["boards"]:
         sch = board.get("schedule") or {}
@@ -3414,11 +3464,19 @@ def _scheduler_tick() -> None:
             reasons = (reasons or []) + ["wake"]
 
         if do_push:
-            logger.info(f"Scheduled push -> Vestaboard '{board['name']}' ({mode}{': ' + ','.join(reasons) if reasons else ''})")
-            _finish_push(entry, push_vestaboard_target(board, wsdot))
-            if observed is not None:
-                entry["pushed_spaces"] = observed["spaces"]
-                entry["observed_docked"] = observed["docked"]
+            result = push_vestaboard_target(board, wsdot)
+            if result.get("skipped"):
+                # WSDOT data unavailable: leave the board's last message sitting
+                # and don't advance last_push, so we retry and push once it's back.
+                logger.info(f"Skipped Vestaboard '{board['name']}' — {result['skipped']}; keeping last message")
+                entry["ok"] = True
+                entry["message"] = _result_message(result)
+            else:
+                logger.info(f"Scheduled push -> Vestaboard '{board['name']}' ({mode}{': ' + ','.join(reasons) if reasons else ''})")
+                _finish_push(entry, result)
+                if observed is not None:
+                    entry["pushed_spaces"] = observed["spaces"]
+                    entry["observed_docked"] = observed["docked"]
             dirty = True
 
     for dev in settings["trmnl"]["devices"]:
@@ -3432,8 +3490,14 @@ def _scheduler_tick() -> None:
         else:
             do_push = _interval_due(entry, sch.get("interval_min", 15), TRMNL_MIN_INTERVAL_MIN, now)
         if do_push:
-            logger.info(f"Scheduled push -> TRMNL '{dev['name']}' ({mode})")
-            _finish_push(entry, push_trmnl_target(dev, wsdot))
+            result = push_trmnl_target(dev, wsdot)
+            if result.get("skipped"):
+                logger.info(f"Skipped TRMNL '{dev['name']}' — {result['skipped']}; keeping last screen")
+                entry["ok"] = True
+                entry["message"] = _result_message(result)
+            else:
+                logger.info(f"Scheduled push -> TRMNL '{dev['name']}' ({mode})")
+                _finish_push(entry, result)
             dirty = True
 
     if dirty:

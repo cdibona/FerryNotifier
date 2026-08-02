@@ -99,6 +99,19 @@ minutes (default 3) *before* our quiet window's start time, and ferry pushes sto
 same early moment so nothing overwrites the goodnight. `_in_quiet_hours()` implements the
 shift; the wake time is not shifted.
 
+When WSDOT glitches, the `terminalsailingspace` fetch times out or returns empty, and since
+both the departure list and the space counts come from that one endpoint, the board would
+flip to `BAIN-SEA --` / `SPACES: N/A`. `push_vestaboard_target()` guards against this with
+`_ferry_data_is_stale()` and returns `{"skipped": reason}` instead of sending; the scheduler
+then leaves `last_push` untouched so the board keeps its last good message and retries next
+tick (fetch is cached ~5 min, so retries don't hammer WSDOT). "Stale" for a routed board
+means **both** the next departure and the spaces count are missing — a real departure with an
+unknown space count still pushes. Note `fetch_ferry_status` caches even a partial (space-fetch
+-failed) read, so a glitch persists in-app for up to the cache TTL after WSDOT recovers.
+`push_trmnl_target()` has the same guard (a blackout would push a blank `--` TRMNL screen);
+`ferry_merge_variables()` itself is left unguarded because the polling/JSON API should still
+return data.
+
 A board can override the built-in layout with `board['template']` — a sandboxed Jinja
 template, one rendered line per board row (`LEFT | RIGHT` splits a row, anything else
 centers). Two gotchas: the env uses `trim_blocks`/`lstrip_blocks` so an `{% if %}` on its

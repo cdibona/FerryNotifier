@@ -114,6 +114,13 @@ the exact start time can be swallowed and leave the ferry layout up all night. F
 pushes stop at the same early moment, so nothing overwrites the goodnight. Set the lead
 to 0 to fire exactly at the start time.
 
+**Glitch-resistant pushes.** If a WSDOT read comes back empty (its data feed drops out
+briefly), a scheduled push would otherwise flip the display to `-- / SPACES: N/A` (or a blank
+`--` TRMNL screen). Instead the push is skipped and the device keeps its last good content;
+the scheduler retries on the next tick and updates as soon as real data returns. This covers
+both Vestaboard and TRMNL. A manual **Push now** during an outage reports "Skipped — WSDOT
+data unavailable" rather than blanking the display.
+
 **Custom board layouts.** Under **Advanced** in the board editor, a template can replace
 the built-in Vestaboard layout without touching the code. One rendered line per board row;
 a line containing `|` splits into left- and right-aligned halves, everything else is
