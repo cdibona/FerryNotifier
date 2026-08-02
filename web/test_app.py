@@ -678,6 +678,27 @@ def test_push_skips_on_stale_wsdot():
 
 
 @patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_vestaboard_409_is_unchanged_not_error():
+    """A 409 (identical message already on the board) is a benign no-op, not a failure."""
+    import app
+    grid = [[0] * 15 for _ in range(3)]
+    resp = MagicMock(); resp.status_code = 409
+    # raise_for_status must NOT be consulted for a 409 -> make it explode if called.
+    resp.raise_for_status.side_effect = AssertionError("409 should short-circuit before raise_for_status")
+    with patch('app.requests.post', return_value=resp):
+        result = app.send_to_vestaboard(grid, key='k')
+    assert 'error' not in result and result.get('status') == 'unchanged'
+
+    # A genuine failure is still an error.
+    import requests
+    bad = MagicMock(); bad.status_code = 500
+    bad.raise_for_status.side_effect = requests.exceptions.HTTPError("500")
+    with patch('app.requests.post', return_value=bad):
+        result = app.send_to_vestaboard(grid, key='k')
+    assert 'error' in result
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
 def test_trmnl_push_skips_on_stale_wsdot():
     """A blackout read skips the TRMNL webhook too, so the device keeps its screen."""
     import app

@@ -2432,6 +2432,13 @@ def send_to_vestaboard(characters: list, key: Optional[str] = None,
             json={"characters": characters},
             timeout=10,
         )
+        # The Read/Write API returns 409 Conflict when the message being sent is
+        # identical to what the board already displays. That's a no-op, not a
+        # failure — treat it as "already up to date" so it doesn't show as an
+        # error or freeze a target. (A layout with no changing field — e.g. a
+        # custom template with no time — hits this whenever the data is steady.)
+        if response.status_code == 409:
+            return {"status": "unchanged", "detail": "board already shows this message"}
         response.raise_for_status()
         body = response.json() if response.content else {}
         return {"status": "sent", "response": body}

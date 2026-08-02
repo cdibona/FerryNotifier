@@ -90,6 +90,16 @@ Also: **in Liquid an empty string is truthy** (only `nil`/`false` are falsy), so
 Vestaboard: check `vb_dimensions(model)` before assuming grid size — Note is 3 rows × 15 cols,
 Flagship is 6 × 22, and markup that fits one clips on the other.
 
+The Read/Write API returns **409 Conflict when the message being sent is identical to what the
+board already shows** — a no-op, not a failure. `send_to_vestaboard()` maps 409 to
+`{"status": "unchanged"}`. This bites custom templates with no changing field: the built-in
+Note layout puts a live `NO DELAYS @HH:MM` clock on row 3 so consecutive pushes always differ,
+but a template like `{{ origin }}-{{ dest }} {{ time_short }}` / `SPACES: {{ spaces }}` renders
+byte-identical whenever the data is steady (and during a WSDOT blackout every field is `--` /
+`N/A`), so every push 409'd and the board looked frozen. The stale-data skip (above) already
+avoids pushing the blackout frame; the 409 mapping keeps a steady-data repeat from surfacing as
+an error.
+
 ## Vestaboard quiet hours and board templates
 
 A board's own Quiet Hours (set in the Vestaboard app / web2.vestaboard.com) **drop incoming
