@@ -109,15 +109,20 @@ minutes (default 3) *before* our quiet window's start time, and ferry pushes sto
 same early moment so nothing overwrites the goodnight. `_in_quiet_hours()` implements the
 shift; the wake time is not shifted.
 
-When WSDOT glitches, the `terminalsailingspace` fetch times out or returns empty, and since
-both the departure list and the space counts come from that one endpoint, the board would
-flip to `BAIN-SEA --` / `SPACES: N/A`. `push_vestaboard_target()` guards against this with
-`_ferry_data_is_stale()` and returns `{"skipped": reason}` instead of sending; the scheduler
-then leaves `last_push` untouched so the board keeps its last good message and retries next
-tick (fetch is cached ~5 min, so retries don't hammer WSDOT). "Stale" for a routed board
-means **both** the next departure and the spaces count are missing — a real departure with an
-unknown space count still pushes. Note `fetch_ferry_status` caches even a partial (space-fetch
--failed) read, so a glitch persists in-app for up to the cache TTL after WSDOT recovers.
+The `terminalsailingspace` endpoint is the only source of drive-up space counts, and WSDOT
+intermittently **omits busy terminals (Seattle, Bainbridge) from it even while it returns 200**
+— not just on timeouts. Departure *times* therefore fall back through three sources in
+`compute_direction_status()` via `time_source`: `sailingspace` (time + spaces) →
+`schedule` (WSF `scheduletoday`, time only) → `vessels` (live `ScheduledDeparture`, time only).
+The fallbacks give a real time but `spaces` is `None` (renders `N/A`). Only when **all three**
+yield no upcoming departure and there's no space count is the status a true blackout.
+
+`push_vestaboard_target()` guards a blackout with `_ferry_data_is_stale()` and returns
+`{"skipped": reason}` instead of sending; the scheduler then leaves `last_push` untouched so
+the board keeps its last good message and retries next tick (fetch is cached ~5 min, so retries
+don't hammer WSDOT). "Stale" for a routed board means **both** the next departure (across all
+three sources) and the spaces count are missing. Note `fetch_ferry_status` caches even a
+partial read, so a gap persists in-app for up to the cache TTL after WSDOT recovers.
 `push_trmnl_target()` has the same guard (a blackout would push a blank `--` TRMNL screen);
 `ferry_merge_variables()` itself is left unguarded because the polling/JSON API should still
 return data.

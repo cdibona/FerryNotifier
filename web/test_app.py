@@ -637,6 +637,55 @@ def test_scheduler_sleeps_early_by_lead(tmp_path):
 
 
 @patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
+def test_direction_status_fallback_sources():
+    """When sailingspace omits the terminals, fall back to schedule, then vessels."""
+    import app
+    from datetime import datetime, timedelta
+    soon = datetime.now() + timedelta(minutes=20)
+    later = datetime.now() + timedelta(minutes=50)
+
+    def wsdot(ms_dt):
+        return f"/Date({int(ms_dt.timestamp() * 1000)}-0800)/"
+
+    # 1) sailingspace present -> used, with its drive-up count.
+    d1 = {'terminal_departures': {'Bainbridge Island': [
+              {'time': soon, 'arrival': 'Seattle', 'vessel': 'Tacoma', 'drive_up': 88}]},
+          'terminal_spaces': {}, 'schedule_departures': {}, 'vessels': [], 'alerts': []}
+    s1 = app.compute_direction_status(d1, 'sea-bi', 'Bainbridge Island')
+    assert s1['time_source'] == 'sailingspace' and s1['spaces'] == 88 and s1['vessel'] == 'Tacoma'
+
+    # 2) sailingspace empty -> schedule fallback: real time, no spaces.
+    d2 = {'terminal_departures': {}, 'terminal_spaces': {}, 'vessels': [],
+          'schedule_departures': {'Bainbridge Island': [
+              {'time': later, 'arrival': 'Seattle', 'vessel': 'Wenatchee'},
+              {'time': soon, 'arrival': 'Seattle', 'vessel': 'Tacoma'}]},
+          'alerts': []}
+    s2 = app.compute_direction_status(d2, 'sea-bi', 'Bainbridge Island')
+    assert s2['time_source'] == 'schedule' and s2['spaces'] is None
+    assert s2['vessel'] == 'Tacoma' and s2['time_str'] != '--'   # soonest wins
+    # A schedule-only status is NOT stale -> it still pushes (with N/A spaces).
+    assert app._ferry_data_is_stale(d2, s2) is False
+
+    # 3) both empty -> live vessel feed fallback.
+    d3 = {'terminal_departures': {}, 'terminal_spaces': {}, 'schedule_departures': {},
+          'vessels': [
+              {'VesselName': 'Tacoma', 'InService': True, 'DepartingTerminalName': 'Bainbridge Island',
+               'ArrivingTerminalName': 'Seattle', 'ScheduledDeparture': wsdot(soon)},
+              {'VesselName': 'Wenatchee', 'InService': True, 'DepartingTerminalName': 'Seattle',
+               'ArrivingTerminalName': 'Bainbridge Island', 'ScheduledDeparture': wsdot(soon)}],
+          'alerts': []}
+    s3 = app.compute_direction_status(d3, 'sea-bi', 'Bainbridge Island')
+    assert s3['time_source'] == 'vessels' and s3['vessel'] == 'Tacoma' and s3['spaces'] is None
+
+    # 4) nothing anywhere -> no time, stale (skip preserved).
+    d4 = {'terminal_departures': {}, 'terminal_spaces': {}, 'schedule_departures': {},
+          'vessels': [], 'alerts': []}
+    s4 = app.compute_direction_status(d4, 'sea-bi', 'Bainbridge Island')
+    assert s4['time_source'] is None and s4['time_str'] == '--'
+    assert app._ferry_data_is_stale(d4, s4) is True
+
+
+@patch.dict(os.environ, {'WSDOT_API_KEY': 'test', 'FLASK_PORT': '5050'})
 def test_ferry_data_is_stale():
     """Only the total 'no departure AND no spaces' blackout counts as stale."""
     import app

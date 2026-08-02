@@ -1771,23 +1771,41 @@ def compute_direction_status(data: Dict[str, Any], route: Optional[str],
     from_t, to_t = chosen["from"], chosen["to"]
 
     now = _now()
-    departures = data.get("terminal_departures", {}).get(from_t, [])
-    # Next future departure toward the arrival terminal (or any, if to_t is None).
-    upcoming = [
-        d for d in departures
-        if d.get("time") and d["time"] >= now and (to_t is None or d.get("arrival") == to_t)
-    ]
-    upcoming.sort(key=lambda d: d["time"])
-    nxt = upcoming[0] if upcoming else None
 
-    # Spaces: from the chosen departure, else the terminal's headline space count.
+    def _next_toward(rows):
+        """Soonest future departure in ``rows`` heading to to_t (or any)."""
+        fut = [d for d in rows
+               if d.get("time") and d["time"] >= now and (to_t is None or d.get("arrival") == to_t)]
+        return min(fut, key=lambda d: d["time"]) if fut else None
+
+    # Preferred source: terminalsailingspace — carries both the time and the
+    # drive-up space count.
+    nxt = _next_toward(data.get("terminal_departures", {}).get(from_t, []))
     if nxt is not None:
+        dep_time, vessel, time_source = nxt["time"], nxt.get("vessel"), "sailingspace"
         spaces = nxt.get("drive_up")
     else:
+        dep_time, vessel, time_source = None, None, None
         spaces = data.get("terminal_spaces", {}).get(from_t, {}).get("drive_up")
 
+    # Fallbacks for the time when sailingspace omits this route's terminals. Both
+    # give a real departure time but no drive-up count (spaces stays N/A).
+    if dep_time is None:
+        sched = _next_toward(data.get("schedule_departures", {}).get(from_t, []))
+        if sched is not None:
+            dep_time, vessel, time_source = sched["time"], sched.get("vessel"), "schedule"
+
+    if dep_time is None:
+        # Last resort: a live vessel about to depart from_t toward to_t.
+        vf = [{"time": parse_wsdot_date(v.get("ScheduledDeparture")),
+               "arrival": v.get("ArrivingTerminalName"), "vessel": v.get("VesselName")}
+              for v in data.get("vessels", [])
+              if v.get("InService") and v.get("DepartingTerminalName") == from_t]
+        nv = _next_toward(vf)
+        if nv is not None:
+            dep_time, vessel, time_source = nv["time"], nv.get("vessel"), "vessels"
+
     alerts = data.get("alerts", [])
-    dep_time = nxt["time"] if nxt else None
     return {
         "route_id": route,
         "from": from_t,
@@ -1796,8 +1814,11 @@ def compute_direction_status(data: Dict[str, Any], route: Optional[str],
         "to_short": _terminal_short(to_t) if to_t else "",
         "departure_time": dep_time.isoformat() if dep_time else None,
         "time_str": _fmt_time(dep_time),
-        "vessel": nxt.get("vessel") if nxt else None,
+        "vessel": vessel,
         "spaces": spaces,
+        # Which feed the time came from: sailingspace | schedule | vessels | None.
+        # Fallback sources ('schedule'/'vessels') have no drive-up count.
+        "time_source": time_source,
         "delay": route_alert(route, alerts, delays_only=True),
         "alert": route_alert(route, alerts),
     }
@@ -1974,12 +1995,35 @@ def fetch_ferry_status(route_id: Optional[str] = None, api_key: Optional[str] = 
         except Exception as e:
             logger.warning(f"Could not fetch alerts: {e}")
 
+        # Fetch today's remaining scheduled departures. This is the authoritative
+        # timetable and is used as a fallback for the next-departure time when the
+        # terminalsailingspace feed omits this route's terminals (a recurring WSDOT
+        # gap that would otherwise blank the board). It carries no drive-up counts.
+        schedule_departures: Dict[str, list] = {}
+        route_wsdot_id = ROUTE_WSDOT_IDS.get(route or "")
+        if route_wsdot_id:
+            try:
+                sched_url = f"{WSDOT_API_BASE_URL}/schedule/rest/scheduletoday/{route_wsdot_id}/true"
+                sched_resp = requests.get(sched_url, params=params, timeout=10)
+                sched_resp.raise_for_status()
+                for combo in (sched_resp.json() or {}).get("TerminalCombos", []):
+                    dep_name = combo.get("DepartingTerminalName", "")
+                    arr_name = combo.get("ArrivingTerminalName", "")
+                    for t in combo.get("Times", []):
+                        dt = parse_wsdot_date(t.get("DepartingTime"))
+                        if dt:
+                            schedule_departures.setdefault(dep_name, []).append(
+                                {"time": dt, "arrival": arr_name, "vessel": t.get("VesselName")})
+            except Exception as e:
+                logger.warning(f"Could not fetch today's schedule: {e}")
+
         result = {
             "vessels": vessels_data,
             "route_id": route,
             "route_name": ROUTE_NAMES.get(route, "Washington State Ferries") if route else "All Routes",
             "terminal_spaces": terminal_spaces,
             "terminal_departures": terminal_departures,
+            "schedule_departures": schedule_departures,
             "alerts": alerts,
             "timestamp": datetime.now().isoformat()
         }
@@ -2271,6 +2315,9 @@ def board_template_context(data: Dict[str, Any], status: Optional[Dict[str, Any]
         "time_short": _fmt_time_short(_departure_time_obj(status)),
         "vessel": st.get("vessel") or "",
         "spaces": spaces if spaces is not None else "N/A",
+        # Where the time came from: 'sailingspace' has live spaces; 'schedule'
+        # and 'vessels' are timetable fallbacks (spaces read 'N/A').
+        "time_source": st.get("time_source"),
         "delay": st.get("delay") or None,
         "alert": st.get("alert") or None,
         "clock": now.strftime("%H:%M"),
